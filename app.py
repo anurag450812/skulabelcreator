@@ -50,7 +50,7 @@ def take_barcode_screenshots(fsn_pdf, fsn_sku_map, output_dir):
 
             crop_x0 = (img_rect.x0 - pad_x) if img_rect else (fsn_rect.x0 - 20)
             crop_x1 = (img_rect.x1 + pad_x) if img_rect else (fsn_rect.x1 + 20)
-            crop_y0 = (img_rect.y0 - pad_y) if img_rect else (fsn_rect.y0 - 65)
+            crop_y0 = fsn_rect.y0 - pad_y
             crop_y1 = bottom_rect.y1 + pad_y
 
             final_rect = fitz.Rect(crop_x0, crop_y0, crop_x1, crop_y1)
