@@ -435,6 +435,72 @@ def generate_boxes():
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
+def trim_white_margins(page, clip=None, threshold=240):
+    if clip is None:
+        clip = page.rect
+    mat = fitz.Matrix(3.0, 3.0)
+    pix = page.get_pixmap(matrix=mat, clip=clip)
+    w, h = pix.width, pix.height
+    samples = pix.samples
+    stride = pix.stride
+
+    def pixel_is_white(x, y):
+        offset = y * stride + x * 3
+        r, g, b = samples[offset], samples[offset + 1], samples[offset + 2]
+        return r > threshold and g > threshold and b > threshold
+
+    top = 0
+    for y in range(h):
+        found = False
+        for x in range(w):
+            if not pixel_is_white(x, y):
+                found = True
+                break
+        if found:
+            break
+        top = y
+
+    bottom = h - 1
+    for y in range(h - 1, -1, -1):
+        found = False
+        for x in range(w):
+            if not pixel_is_white(x, y):
+                found = True
+                break
+        if found:
+            break
+        bottom = y
+
+    left = 0
+    for x in range(w):
+        found = False
+        for y in range(h):
+            if not pixel_is_white(x, y):
+                found = True
+                break
+        if found:
+            break
+        left = x
+
+    right = w - 1
+    for x in range(w - 1, -1, -1):
+        found = False
+        for y in range(h):
+            if not pixel_is_white(x, y):
+                found = True
+                break
+        if found:
+            break
+        right = x
+
+    scale = 1.0 / 3.0
+    return fitz.Rect(
+        clip.x0 + max(left * scale - 2, 0),
+        clip.y0 + max(top * scale - 2, 0),
+        clip.x0 + min(right * scale + 2, clip.width),
+        clip.y0 + min(bottom * scale + 2, clip.height),
+    )
+
 @app.route('/crop-box-labels', methods=['POST'])
 def crop_box_labels():
     if 'boxlabels' not in request.files:
@@ -458,15 +524,10 @@ def crop_box_labels():
 
             box_id_instances = page.search_for("Box ID")
 
-            if not box_id_instances:
-                new_page = output_doc.new_page(width=page_rect.width, height=page_rect.height)
-                new_page.show_pdf_page(new_page.rect, doc, page_num)
-                continue
-
-            if len(box_id_instances) == 1:
-                clip = page_rect
-                new_page = output_doc.new_page(width=clip.width, height=clip.height)
-                new_page.show_pdf_page(new_page.rect, doc, page_num, clip=clip)
+            if not box_id_instances or len(box_id_instances) == 1:
+                trimmed = trim_white_margins(page)
+                new_page = output_doc.new_page(width=trimmed.width, height=trimmed.height)
+                new_page.show_pdf_page(new_page.rect, doc, page_num, clip=trimmed)
                 continue
 
             y_positions = sorted([r.y0 for r in box_id_instances])
@@ -479,8 +540,9 @@ def crop_box_labels():
 
             for i in range(len(boundaries) - 1):
                 clip = fitz.Rect(0, boundaries[i], page_rect.width, boundaries[i + 1])
-                new_page = output_doc.new_page(width=clip.width, height=clip.height)
-                new_page.show_pdf_page(new_page.rect, doc, page_num, clip=clip)
+                trimmed = trim_white_margins(page, clip=clip)
+                new_page = output_doc.new_page(width=trimmed.width, height=trimmed.height)
+                new_page.show_pdf_page(new_page.rect, doc, page_num, clip=trimmed)
 
         output_path = os.path.join(tmp_dir, 'Cropped_Box_Labels.pdf')
         output_doc.save(output_path)
