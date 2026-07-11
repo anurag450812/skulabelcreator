@@ -364,47 +364,43 @@ def generate_boxes():
     try:
         consignment.save(csv_path)
         df = pd.read_csv(csv_path)
+        df.columns = df.columns.str.strip()
 
-        box_capacity = 20
-        rows = []
-        box_number = 1
-
+        units = []
         for _, row in df.iterrows():
-            sku = row['SKU Id']
-            fsn = row['FSN']
             qty = int(row['Quantity Sent'])
+            for _ in range(qty):
+                units.append({'fsn': str(row['FSN']).strip(), 'sku': str(row['SKU Id']).strip()})
 
-            num_full = qty // box_capacity
-            for _ in range(num_full):
-                rows.append({
+        box_size = 20
+        output_rows = []
+
+        for i in range(0, len(units), box_size):
+            box_units = units[i:i+box_size]
+            box_number = (i // box_size) + 1
+
+            counts = {}
+            for u in box_units:
+                key = (u['fsn'], u['sku'])
+                counts[key] = counts.get(key, 0) + 1
+
+            name_parts = [f"{sku}({qty})" for (fsn, sku), qty in counts.items()]
+            box_name = f"{box_number}_{''.join(name_parts)}"
+
+            for (fsn, sku), qty in counts.items():
+                output_rows.append({
                     'BOX NUMBER': box_number,
-                    'BOX NAME': f"{box_number}_{sku}({box_capacity})",
+                    'BOX NAME': box_name,
                     'LENGTH (cm)': 54,
                     'BREADTH (cm)': 40,
                     'HEIGHT (cm)': 35,
                     'WEIGHT (kg)': 12,
                     'NOMINAL VALUE (INR)': 600,
                     'FSN': fsn,
-                    'QUANTITY': box_capacity,
+                    'QUANTITY': qty,
                 })
-                box_number += 1
 
-            remainder = qty % box_capacity
-            if remainder > 0:
-                rows.append({
-                    'BOX NUMBER': box_number,
-                    'BOX NAME': f"{box_number}_{sku}({remainder})",
-                    'LENGTH (cm)': 54,
-                    'BREADTH (cm)': 40,
-                    'HEIGHT (cm)': 35,
-                    'WEIGHT (kg)': 12,
-                    'NOMINAL VALUE (INR)': 600,
-                    'FSN': fsn,
-                    'QUANTITY': remainder,
-                })
-                box_number += 1
-
-        out_df = pd.DataFrame(rows)
+        out_df = pd.DataFrame(output_rows)
         output_path = os.path.join(tmp_dir, 'Generated_Box_Details.csv')
         out_df.to_csv(output_path, index=False)
 
