@@ -20,7 +20,7 @@ REQUIRED_COLUMNS = [
     'Product Name', 'FSN', 'SKU Id', 'Brand', 'Quantity Sent', 'MRP',
     'Net Quantity', 'Generic Name', 'Month & Year of Manufacturing',
     'Manufactured by / Marketed by', 'Customer Care Details',
-    'EAN/FSN/LID Barcode', 'Dimensions (cm)'
+    'EAN/FSN/LID Barcode', 'Dimensions (cm)', 'Size'
 ]
 
 DEFAULT_VALUES = {
@@ -31,6 +31,7 @@ DEFAULT_VALUES = {
     'Customer Care Details': 'email us at- xidlzzzzzz@gmail.com',
     'EAN/FSN/LID Barcode': '',
     'Dimensions (cm)': '48*16*3 cm',
+    'Size': 'medium',
 }
 
 def take_barcode_screenshots(fsn_pdf, fsn_sku_map, output_dir):
