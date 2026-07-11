@@ -16,28 +16,35 @@ def take_barcode_screenshots(fsn_pdf, fsn_sku_map, output_dir=r"D:\sku labels\te
     pad_y = 5 
     
     for page in doc:
-        # Get all text blocks to find the title line accurately
         blocks = page.get_text("blocks")
         images_info = page.get_image_info()
-        
+
+        # Precompute ALL FSN text positions on this page for row separation
+        all_fsn_rects = []
+        for fkey in fsn_sku_map:
+            hits = page.search_for(fkey)
+            for h in hits:
+                all_fsn_rects.append(h)
+
         for fsn, sku in fsn_sku_map.items():
             fsn_instances = page.search_for(fsn)
             if not fsn_instances:
                 continue
-                
+
             fsn_rect = fsn_instances[0]
-            
+
             # --- 1. Find Barcode (Top) - belonging to THIS row only ---
             img_rect = None
             for img in images_info:
                 rect = fitz.Rect(img["bbox"])
                 if rect.y1 <= fsn_rect.y0 + 15 and abs(((rect.x0 + rect.x1)/2) - ((fsn_rect.x0 + fsn_rect.x1)/2)) < 45:
-                    has_fsn_between = False
-                    for other_fsn in fsn_instances[1:]:
-                        if rect.y0 < other_fsn.y0 < fsn_rect.y0:
-                            has_fsn_between = True
-                            break
-                    if not has_fsn_between:
+                    # Ensure no other FSN text sits between this image and our FSN
+                    has_other_fsn_between = any(
+                        rect.y0 < other.y0 < fsn_rect.y0
+                        for other in all_fsn_rects
+                        if other != fsn_rect
+                    )
+                    if not has_other_fsn_between:
                         img_rect = rect
                         break
             

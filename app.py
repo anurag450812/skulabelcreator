@@ -27,6 +27,13 @@ def take_barcode_screenshots(fsn_pdf, fsn_sku_map, output_dir):
         blocks = page.get_text("blocks")
         images_info = page.get_image_info()
 
+        # Precompute ALL FSN text positions on this page for row separation
+        all_fsn_rects = []
+        for fkey in fsn_sku_map:
+            hits = page.search_for(fkey)
+            for h in hits:
+                all_fsn_rects.append(h)
+
         for fsn, sku in fsn_sku_map.items():
             fsn_instances = page.search_for(fsn)
             if not fsn_instances:
@@ -38,12 +45,12 @@ def take_barcode_screenshots(fsn_pdf, fsn_sku_map, output_dir):
             for img in images_info:
                 rect = fitz.Rect(img["bbox"])
                 if rect.y1 <= fsn_rect.y0 + 15 and abs(((rect.x0 + rect.x1)/2) - ((fsn_rect.x0 + fsn_rect.x1)/2)) < 45:
-                    has_fsn_between = False
-                    for other_fsn in fsn_instances[1:]:
-                        if rect.y0 < other_fsn.y0 < fsn_rect.y0:
-                            has_fsn_between = True
-                            break
-                    if not has_fsn_between:
+                    has_other_fsn_between = any(
+                        rect.y0 < other.y0 < fsn_rect.y0
+                        for other in all_fsn_rects
+                        if other != fsn_rect
+                    )
+                    if not has_other_fsn_between:
                         img_rect = rect
                         break
 
