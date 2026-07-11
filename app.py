@@ -261,8 +261,10 @@ def check_columns():
         qc_files = request.files.getlist('qc')
         if qc_files:
             for qc_file in qc_files:
-                if qc_file.filename and qc_file.filename.lower().startswith('quality_check') and qc_file.filename.lower().endswith('.csv'):
-                    qc_path = os.path.join(tmp_dir, qc_file.filename)
+                fname = qc_file.filename or ''
+                base_name = os.path.basename(fname).lower()
+                if base_name.startswith('quality_check') and base_name.endswith('.csv'):
+                    qc_path = os.path.join(tmp_dir, base_name)
                     qc_file.save(qc_path)
                     try:
                         qc_df = pd.read_csv(qc_path)
