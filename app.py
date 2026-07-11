@@ -435,5 +435,67 @@ def generate_boxes():
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
+@app.route('/crop-box-labels', methods=['POST'])
+def crop_box_labels():
+    if 'boxlabels' not in request.files:
+        return jsonify({'error': 'Box labels PDF is required'}), 400
+
+    boxlabels = request.files['boxlabels']
+    if not boxlabels.filename:
+        return jsonify({'error': 'Box labels PDF is required'}), 400
+
+    tmp_dir = tempfile.mkdtemp()
+    pdf_path = os.path.join(tmp_dir, boxlabels.filename)
+
+    try:
+        boxlabels.save(pdf_path)
+        doc = fitz.open(pdf_path)
+        output_doc = fitz.open()
+        padding = 2
+
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            drawings = page.get_drawings()
+
+            rects = []
+            for d in drawings:
+                if d.get("type") == "re":
+                    r = fitz.Rect(d["rect"])
+                    if r.width > 50 and r.height > 50:
+                        rects.append(r)
+
+            if not rects:
+                rects = [page.rect]
+
+            seen = set()
+            for r in rects:
+                key = (round(r.x0, 1), round(r.y0, 1), round(r.x1, 1), round(r.y1, 1))
+                if key in seen:
+                    continue
+                seen.add(key)
+
+                clip = fitz.Rect(
+                    max(r.x0 - padding, 0),
+                    max(r.y0 - padding, 0),
+                    min(r.x1 + padding, page.rect.width),
+                    min(r.y1 + padding, page.rect.height),
+                )
+                new_page = output_doc.new_page(width=clip.width, height=clip.height)
+                new_page.show_pdf_page(new_page.rect, doc, page_num, clip=clip)
+
+        output_path = os.path.join(tmp_dir, 'Cropped_Box_Labels.pdf')
+        output_doc.save(output_path)
+        output_doc.close()
+        doc.close()
+
+        return send_file(output_path, as_attachment=True,
+                         download_name='Cropped_Box_Labels.pdf',
+                         mimetype='application/pdf')
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

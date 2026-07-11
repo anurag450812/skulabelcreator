@@ -130,6 +130,10 @@
             margin-right: 6px;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
+        .divider {
+            border-top: 1px solid #30363d;
+            margin: 28px 0;
+        }
     </style>
 </head>
 <body>
@@ -167,6 +171,25 @@
         </form>
 
         <div class="status" id="status"></div>
+
+        <div class="divider"></div>
+
+        <h1>Box Label Cropper</h1>
+        <p class="subtitle">Upload a box labels PDF to crop each label into separate pages.</p>
+
+        <form id="cropForm">
+            <div class="dropzone" id="dz-boxlabels">
+                <input type="file" id="file-boxlabels" accept=".pdf">
+                <div class="dropzone-icon">✂️</div>
+                <div class="dropzone-title">Box Labels PDF</div>
+                <div class="dropzone-hint">PDF with rectangular box labels</div>
+                <div class="filename" id="name-boxlabels"></div>
+            </div>
+
+            <button type="submit" class="btn btn-primary" id="btn-crop" disabled style="background:#8957e5;">Crop Box Labels</button>
+        </form>
+
+        <div class="status" id="status-crop"></div>
     </div>
 
     <script>
@@ -332,6 +355,66 @@
             } finally {
                 btnBoxes.disabled = false;
                 updateUI();
+            }
+        });
+
+        // --- Box Label Cropper ---
+        const fileBoxLabels = document.getElementById('file-boxlabels');
+        const nameBoxLabels = document.getElementById('name-boxlabels');
+        const dzBoxLabels = document.getElementById('dz-boxlabels');
+        const btnCrop = document.getElementById('btn-crop');
+        const statusCrop = document.getElementById('status-crop');
+        const cropForm = document.getElementById('cropForm');
+
+        fileBoxLabels.addEventListener('change', () => {
+            nameBoxLabels.textContent = fileBoxLabels.files[0]?.name || '';
+            dzBoxLabels.classList.toggle('has-file', !!fileBoxLabels.files[0]);
+            btnCrop.disabled = !fileBoxLabels.files[0];
+        });
+
+        dzBoxLabels.addEventListener('dragover', e => { e.preventDefault(); dzBoxLabels.classList.add('dragover'); });
+        dzBoxLabels.addEventListener('dragleave', () => dzBoxLabels.classList.remove('dragover'));
+        dzBoxLabels.addEventListener('drop', () => dzBoxLabels.classList.remove('dragover'));
+
+        cropForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!fileBoxLabels.files[0]) return;
+            btnCrop.disabled = true;
+            statusCrop.className = 'status loading';
+            statusCrop.innerHTML = '<span class="spinner"></span>Cropping labels...';
+
+            const formData = new FormData();
+            formData.append('boxlabels', fileBoxLabels.files[0]);
+
+            try {
+                const resp = await fetch('/crop-box-labels', { method: 'POST', body: formData });
+
+                if (!resp.ok) {
+                    let msg = 'Server error';
+                    try {
+                        const data = JSON.parse(await resp.text());
+                        msg = data.error || msg;
+                    } catch {}
+                    throw new Error(msg);
+                }
+
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'Cropped_Box_Labels.pdf';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+
+                statusCrop.className = 'status success';
+                statusCrop.textContent = 'Box labels cropped and downloaded!';
+            } catch (err) {
+                statusCrop.className = 'status error';
+                statusCrop.textContent = 'Error: ' + err.message;
+            } finally {
+                btnCrop.disabled = false;
             }
         });
     </script>
