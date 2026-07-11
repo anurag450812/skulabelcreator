@@ -27,13 +27,19 @@ def take_barcode_screenshots(fsn_pdf, fsn_sku_map, output_dir=r"D:\sku labels\te
                 
             fsn_rect = fsn_instances[0]
             
-            # --- 1. Find Barcode (Top) ---
+            # --- 1. Find Barcode (Top) - belonging to THIS row only ---
             img_rect = None
             for img in images_info:
                 rect = fitz.Rect(img["bbox"])
                 if rect.y1 <= fsn_rect.y0 + 15 and abs(((rect.x0 + rect.x1)/2) - ((fsn_rect.x0 + fsn_rect.x1)/2)) < 45:
-                    img_rect = rect
-                    break
+                    has_fsn_between = False
+                    for other_fsn in fsn_instances[1:]:
+                        if rect.y0 < other_fsn.y0 < fsn_rect.y0:
+                            has_fsn_between = True
+                            break
+                    if not has_fsn_between:
+                        img_rect = rect
+                        break
             
             # --- 2. Find Title/SKU line (Bottom) ---
             # Search all blocks for the title line that contains our SKU name
@@ -48,7 +54,7 @@ def take_barcode_screenshots(fsn_pdf, fsn_sku_map, output_dir=r"D:\sku labels\te
             # --- 3. Crop Calculation ---
             crop_x0 = (img_rect.x0 - pad_x) if img_rect else (fsn_rect.x0 - 20)
             crop_x1 = (img_rect.x1 + pad_x) if img_rect else (fsn_rect.x1 + 20)
-            crop_y0 = fsn_rect.y0 - pad_y
+            crop_y0 = (img_rect.y0 - pad_y) if img_rect else (fsn_rect.y0 - pad_y)
             crop_y1 = bottom_rect.y1 + pad_y
             
             final_rect = fitz.Rect(crop_x0, crop_y0, crop_x1, crop_y1)
