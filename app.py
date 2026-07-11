@@ -349,5 +349,73 @@ def check_columns():
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
+@app.route('/generate-boxes', methods=['POST'])
+def generate_boxes():
+    if 'consignment' not in request.files:
+        return jsonify({'error': 'Consignment file is required'}), 400
+
+    consignment = request.files['consignment']
+    if not consignment.filename:
+        return jsonify({'error': 'Consignment file is required'}), 400
+
+    tmp_dir = tempfile.mkdtemp()
+    csv_path = os.path.join(tmp_dir, consignment.filename)
+
+    try:
+        consignment.save(csv_path)
+        df = pd.read_csv(csv_path)
+
+        box_capacity = 20
+        rows = []
+        box_number = 1
+
+        for _, row in df.iterrows():
+            sku = row['SKU Id']
+            fsn = row['FSN']
+            qty = int(row['Quantity Sent'])
+
+            num_full = qty // box_capacity
+            for _ in range(num_full):
+                rows.append({
+                    'BOX NUMBER': box_number,
+                    'BOX NAME': f"{box_number}_{sku}({box_capacity})",
+                    'LENGTH (cm)': 54,
+                    'BREADTH (cm)': 40,
+                    'HEIGHT (cm)': 35,
+                    'WEIGHT (kg)': 12,
+                    'NOMINAL VALUE (INR)': 600,
+                    'FSN': fsn,
+                    'QUANTITY': box_capacity,
+                })
+                box_number += 1
+
+            remainder = qty % box_capacity
+            if remainder > 0:
+                rows.append({
+                    'BOX NUMBER': box_number,
+                    'BOX NAME': f"{box_number}_{sku}({remainder})",
+                    'LENGTH (cm)': 54,
+                    'BREADTH (cm)': 40,
+                    'HEIGHT (cm)': 35,
+                    'WEIGHT (kg)': 12,
+                    'NOMINAL VALUE (INR)': 600,
+                    'FSN': fsn,
+                    'QUANTITY': remainder,
+                })
+                box_number += 1
+
+        out_df = pd.DataFrame(rows)
+        output_path = os.path.join(tmp_dir, 'Generated_Box_Details.csv')
+        out_df.to_csv(output_path, index=False)
+
+        return send_file(output_path, as_attachment=True,
+                         download_name='Generated_Box_Details.csv',
+                         mimetype='text/csv')
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

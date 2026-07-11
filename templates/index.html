@@ -99,6 +99,16 @@
             color: #484f58;
             cursor: not-allowed;
         }
+        .btn-secondary {
+            background: #1f6feb;
+            color: #fff;
+        }
+        .btn-secondary:hover { background: #388bfd; }
+        .btn-secondary:disabled {
+            background: #21262d;
+            color: #484f58;
+            cursor: not-allowed;
+        }
         .status {
             margin-top: 16px;
             text-align: center;
@@ -153,6 +163,7 @@
             </div>
 
             <button type="submit" class="btn btn-primary" id="btn-generate" disabled>Generate Labels</button>
+            <button type="button" class="btn btn-secondary" id="btn-boxes" disabled>Generate Box Details</button>
         </form>
 
         <div class="status" id="status"></div>
@@ -169,6 +180,7 @@
         const dzFsn = document.getElementById('dz-fsn');
         const dzQc = document.getElementById('dz-qc');
         const btnGenerate = document.getElementById('btn-generate');
+        const btnBoxes = document.getElementById('btn-boxes');
         const statusEl = document.getElementById('status');
         const form = document.getElementById('uploadForm');
 
@@ -180,6 +192,7 @@
             dzFsn.classList.toggle('has-file', !!fileFsn.files[0]);
             dzQc.classList.toggle('has-file', !!fileQc.files[0]);
             btnGenerate.disabled = !(fileConsignment.files[0] && fileFsn.files[0]);
+            btnBoxes.disabled = !fileConsignment.files[0];
         }
 
         fileConsignment.addEventListener('change', updateUI);
@@ -276,6 +289,48 @@
                 statusEl.textContent = 'Error: ' + err.message;
             } finally {
                 btnGenerate.disabled = false;
+                updateUI();
+            }
+        });
+
+        btnBoxes.addEventListener('click', async () => {
+            if (!fileConsignment.files[0]) return;
+            btnBoxes.disabled = true;
+            statusEl.className = 'status loading';
+            statusEl.innerHTML = '<span class="spinner"></span>Generating box details...';
+
+            const formData = new FormData();
+            formData.append('consignment', fileConsignment.files[0]);
+
+            try {
+                const resp = await fetch('/generate-boxes', { method: 'POST', body: formData });
+
+                if (!resp.ok) {
+                    let msg = 'Server error';
+                    try {
+                        const data = JSON.parse(await resp.text());
+                        msg = data.error || msg;
+                    } catch {}
+                    throw new Error(msg);
+                }
+
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'Generated_Box_Details.csv';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+
+                statusEl.className = 'status success';
+                statusEl.textContent = 'Box details generated and downloaded!';
+            } catch (err) {
+                statusEl.className = 'status error';
+                statusEl.textContent = 'Error: ' + err.message;
+            } finally {
+                btnBoxes.disabled = false;
                 updateUI();
             }
         });
