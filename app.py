@@ -459,10 +459,27 @@ def crop_box_labels():
 
             rects = []
             for d in drawings:
-                if d.get("type") == "re":
-                    r = fitz.Rect(d["rect"])
-                    if r.width > 50 and r.height > 50:
-                        rects.append(r)
+                for item in d.get("items", []):
+                    if item[0] == "re":
+                        r = fitz.Rect(item[1])
+                        if r.width > 50 and r.height > 50:
+                            rects.append(r)
+                    elif item[0] == "l" and len(d["items"]) == 4:
+                        pass
+
+            if not rects:
+                for d in drawings:
+                    if len(d["items"]) == 4 and all(i[0] == "l" for i in d["items"]):
+                        points = []
+                        for i in d["items"]:
+                            points.append(fitz.Point(i[1]))
+                            points.append(fitz.Point(i[2]))
+                        xs = [p.x for p in points]
+                        ys = [p.y for p in points]
+                        if len(set(xs)) == 2 and len(set(ys)) == 2:
+                            r = fitz.Rect(min(xs), min(ys), max(xs), max(ys))
+                            if r.width > 50 and r.height > 50:
+                                rects.append(r)
 
             if not rects:
                 rects = [page.rect]
