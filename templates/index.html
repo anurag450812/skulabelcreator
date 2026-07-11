@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SKU Label Generator</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0f1117;
+            color: #e1e4e8;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .container {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 40px;
+            width: 100%;
+            max-width: 520px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+        }
+        h1 {
+            font-size: 22px;
+            font-weight: 600;
+            margin-bottom: 6px;
+            color: #f0f6fc;
+        }
+        .subtitle {
+            color: #8b949e;
+            font-size: 14px;
+            margin-bottom: 28px;
+        }
+        .dropzone {
+            border: 2px dashed #30363d;
+            border-radius: 8px;
+            padding: 28px;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+            margin-bottom: 14px;
+            position: relative;
+        }
+        .dropzone:hover, .dropzone.dragover {
+            border-color: #58a6ff;
+            background: rgba(56,139,253,0.06);
+        }
+        .dropzone.has-file {
+            border-color: #3fb950;
+            background: rgba(63,185,80,0.06);
+        }
+        .dropzone input[type="file"] {
+            position: absolute;
+            inset: 0;
+            opacity: 0;
+            cursor: pointer;
+        }
+        .dropzone-icon {
+            font-size: 28px;
+            margin-bottom: 8px;
+        }
+        .dropzone-title {
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+        .dropzone-hint {
+            font-size: 12px;
+            color: #8b949e;
+        }
+        .dropzone .filename {
+            color: #3fb950;
+            font-weight: 500;
+            margin-top: 6px;
+            font-size: 13px;
+        }
+        .btn {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s, opacity 0.2s;
+            margin-top: 8px;
+        }
+        .btn-primary {
+            background: #238636;
+            color: #fff;
+        }
+        .btn-primary:hover { background: #2ea043; }
+        .btn-primary:disabled {
+            background: #21262d;
+            color: #484f58;
+            cursor: not-allowed;
+        }
+        .status {
+            margin-top: 16px;
+            text-align: center;
+            font-size: 13px;
+            min-height: 20px;
+        }
+        .status.error { color: #f85149; }
+        .status.success { color: #3fb950; }
+        .status.loading { color: #d29922; }
+        .spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid #d29922;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+            vertical-align: middle;
+            margin-right: 6px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>SKU Label Generator</h1>
+        <p class="subtitle">Upload your files to generate the final SKU label PDF.</p>
+
+        <form id="uploadForm">
+            <div class="dropzone" id="dz-consignment">
+                <input type="file" name="consignment" id="file-consignment" accept=".csv">
+                <div class="dropzone-icon">📄</div>
+                <div class="dropzone-title">Consignment Details File</div>
+                <div class="dropzone-hint">CSV format &bull; Consignment_Details_*.csv</div>
+                <div class="filename" id="name-consignment"></div>
+            </div>
+
+            <div class="dropzone" id="dz-fsn">
+                <input type="file" name="fsn" id="file-fsn" accept=".pdf">
+                <div class="dropzone-icon">📑</div>
+                <div class="dropzone-title">FSN Label File</div>
+                <div class="dropzone-hint">PDF format &bull; fsn_label_*.pdf</div>
+                <div class="filename" id="name-fsn"></div>
+            </div>
+
+            <button type="submit" class="btn btn-primary" id="btn-generate" disabled>Generate Labels</button>
+        </form>
+
+        <div class="status" id="status"></div>
+    </div>
+
+    <script>
+        const fileConsignment = document.getElementById('file-consignment');
+        const fileFsn = document.getElementById('file-fsn');
+        const nameConsignment = document.getElementById('name-consignment');
+        const nameFsn = document.getElementById('name-fsn');
+        const dzConsignment = document.getElementById('dz-consignment');
+        const dzFsn = document.getElementById('dz-fsn');
+        const btnGenerate = document.getElementById('btn-generate');
+        const statusEl = document.getElementById('status');
+        const form = document.getElementById('uploadForm');
+
+        function updateUI() {
+            nameConsignment.textContent = fileConsignment.files[0]?.name || '';
+            nameFsn.textContent = fileFsn.files[0]?.name || '';
+            dzConsignment.classList.toggle('has-file', !!fileConsignment.files[0]);
+            dzFsn.classList.toggle('has-file', !!fileFsn.files[0]);
+            btnGenerate.disabled = !(fileConsignment.files[0] && fileFsn.files[0]);
+        }
+
+        fileConsignment.addEventListener('change', updateUI);
+        fileFsn.addEventListener('change', updateUI);
+
+        ['dz-consignment', 'dz-fsn'].forEach(id => {
+            const dz = document.getElementById(id);
+            dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
+            dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+            dz.addEventListener('drop', () => dz.classList.remove('dragover'));
+        });
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            btnGenerate.disabled = true;
+            statusEl.className = 'status loading';
+            statusEl.innerHTML = '<span class="spinner"></span>Generating labels...';
+
+            const formData = new FormData();
+            formData.append('consignment', fileConsignment.files[0]);
+            formData.append('fsn', fileFsn.files[0]);
+
+            try {
+                const resp = await fetch('/generate', { method: 'POST', body: formData });
+
+                if (!resp.ok) {
+                    let msg = 'Server error';
+                    try {
+                        const text = await resp.text();
+                        const data = JSON.parse(text);
+                        msg = data.error || msg;
+                    } catch {
+                        msg = msg;
+                    }
+                    throw new Error(msg);
+                }
+
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'Final_SKU_Labels.pdf';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+
+                statusEl.className = 'status success';
+                statusEl.textContent = 'Labels generated and downloaded!';
+            } catch (err) {
+                statusEl.className = 'status error';
+                statusEl.textContent = 'Error: ' + err.message;
+            } finally {
+                btnGenerate.disabled = false;
+                updateUI();
+            }
+        });
+    </script>
+</body>
+</html>
