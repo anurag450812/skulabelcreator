@@ -4,45 +4,76 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SKU Label Generator</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect rx='18' width='100' height='100' fill='%23238636'/><text x='50' y='68' text-anchor='middle' font-size='52' font-family='Arial' font-weight='bold' fill='white'>S</text></svg>">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #0f1117;
+            background: #0d1117;
             color: #e1e4e8;
             min-height: 100vh;
             display: flex;
-            align-items: center;
+            align-items: flex-start;
             justify-content: center;
+            padding: 32px 16px;
         }
         .container {
-            background: #161b22;
-            border: 1px solid #30363d;
-            border-radius: 12px;
-            padding: 40px;
             width: 100%;
-            max-width: 520px;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+            max-width: 560px;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+        .logo {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 48px;
+            height: 48px;
+            background: #238636;
+            border-radius: 12px;
+            font-size: 24px;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 12px;
         }
         h1 {
-            font-size: 22px;
+            font-size: 20px;
             font-weight: 600;
-            margin-bottom: 6px;
             color: #f0f6fc;
+            margin-bottom: 4px;
         }
         .subtitle {
             color: #8b949e;
-            font-size: 14px;
-            margin-bottom: 28px;
+            font-size: 13px;
+        }
+        .card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 16px;
+        }
+        .card-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: #f0f6fc;
+            margin-bottom: 4px;
+        }
+        .card-desc {
+            color: #8b949e;
+            font-size: 12px;
+            margin-bottom: 16px;
         }
         .dropzone {
             border: 2px dashed #30363d;
             border-radius: 8px;
-            padding: 28px;
+            padding: 20px;
             text-align: center;
             cursor: pointer;
             transition: border-color 0.2s, background 0.2s;
-            margin-bottom: 14px;
+            margin-bottom: 10px;
             position: relative;
         }
         .dropzone:hover, .dropzone.dragover {
@@ -60,136 +91,153 @@
             cursor: pointer;
         }
         .dropzone-icon {
-            font-size: 28px;
-            margin-bottom: 8px;
+            font-size: 24px;
+            margin-bottom: 6px;
         }
         .dropzone-title {
-            font-size: 14px;
+            font-size: 13px;
             font-weight: 500;
-            margin-bottom: 4px;
+            margin-bottom: 2px;
         }
         .dropzone-hint {
-            font-size: 12px;
+            font-size: 11px;
             color: #8b949e;
         }
         .dropzone .filename {
             color: #3fb950;
             font-weight: 500;
-            margin-top: 6px;
-            font-size: 13px;
+            margin-top: 4px;
+            font-size: 12px;
+            word-break: break-all;
+        }
+        .btn-row {
+            display: flex;
+            gap: 8px;
+            margin-top: 4px;
         }
         .btn {
-            width: 100%;
-            padding: 12px;
+            flex: 1;
+            padding: 10px 16px;
             border: none;
             border-radius: 8px;
-            font-size: 15px;
+            font-size: 13px;
             font-weight: 600;
             cursor: pointer;
             transition: background 0.2s, opacity 0.2s;
-            margin-top: 8px;
         }
         .btn-primary {
             background: #238636;
             color: #fff;
         }
         .btn-primary:hover { background: #2ea043; }
-        .btn-primary:disabled {
-            background: #21262d;
-            color: #484f58;
-            cursor: not-allowed;
-        }
-        .btn-secondary {
+        .btn-blue {
             background: #1f6feb;
             color: #fff;
         }
-        .btn-secondary:hover { background: #388bfd; }
-        .btn-secondary:disabled {
+        .btn-blue:hover { background: #388bfd; }
+        .btn-purple {
+            background: #8957e5;
+            color: #fff;
+        }
+        .btn-purple:hover { background: #a371f7; }
+        .btn:disabled {
             background: #21262d;
             color: #484f58;
             cursor: not-allowed;
         }
         .status {
-            margin-top: 16px;
+            margin-top: 10px;
             text-align: center;
-            font-size: 13px;
-            min-height: 20px;
+            font-size: 12px;
+            min-height: 18px;
         }
         .status.error { color: #f85149; }
         .status.success { color: #3fb950; }
         .status.loading { color: #d29922; }
         .spinner {
             display: inline-block;
-            width: 14px;
-            height: 14px;
+            width: 12px;
+            height: 12px;
             border: 2px solid #d29922;
             border-top-color: transparent;
             border-radius: 50%;
             animation: spin 0.6s linear infinite;
             vertical-align: middle;
-            margin-right: 6px;
+            margin-right: 4px;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
-        .divider {
-            border-top: 1px solid #30363d;
-            margin: 28px 0;
+        .footer {
+            text-align: center;
+            margin-top: 24px;
+            font-size: 11px;
+            color: #484f58;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>SKU Label Generator</h1>
-        <p class="subtitle">Upload your files to generate the final SKU label PDF.</p>
+        <div class="header">
+            <div class="logo">S</div>
+            <h1>SKU Label Generator</h1>
+            <p class="subtitle">Generate SKU labels, box details, and crop box labels</p>
+        </div>
 
-        <form id="uploadForm">
-            <div class="dropzone" id="dz-consignment">
-                <input type="file" name="consignment" id="file-consignment" accept=".csv">
-                <div class="dropzone-icon">📄</div>
-                <div class="dropzone-title">Consignment Details File</div>
-                <div class="dropzone-hint">CSV format &bull; Consignment_Details_*.csv</div>
-                <div class="filename" id="name-consignment"></div>
-            </div>
+        <div class="card">
+            <div class="card-title">SKU Labels</div>
+            <div class="card-desc">Upload consignment CSV and FSN label PDF to generate SKU label PDF</div>
 
-            <div class="dropzone" id="dz-fsn">
-                <input type="file" name="fsn" id="file-fsn" accept=".pdf">
-                <div class="dropzone-icon">📑</div>
-                <div class="dropzone-title">FSN Label File</div>
-                <div class="dropzone-hint">PDF format &bull; fsn_label_*.pdf</div>
-                <div class="filename" id="name-fsn"></div>
-            </div>
+            <form id="uploadForm">
+                <div class="dropzone" id="dz-consignment">
+                    <input type="file" name="consignment" id="file-consignment" accept=".csv">
+                    <div class="dropzone-icon">📄</div>
+                    <div class="dropzone-title">Consignment Details</div>
+                    <div class="dropzone-hint">CSV &bull; Consignment_Details_*.csv</div>
+                    <div class="filename" id="name-consignment"></div>
+                </div>
 
-            <div class="dropzone" id="dz-qc">
-                <input type="file" id="file-qc" webkitdirectory>
-                <div class="dropzone-icon">📁</div>
-                <div class="dropzone-title">QC Folder (Optional)</div>
-                <div class="dropzone-hint">Folder with Quality_Check*.csv for auto-filling MRP</div>
-                <div class="filename" id="name-qc"></div>
-            </div>
+                <div class="dropzone" id="dz-fsn">
+                    <input type="file" name="fsn" id="file-fsn" accept=".pdf">
+                    <div class="dropzone-icon">📑</div>
+                    <div class="dropzone-title">FSN Label File</div>
+                    <div class="dropzone-hint">PDF &bull; fsn_label_*.pdf</div>
+                    <div class="filename" id="name-fsn"></div>
+                </div>
 
-            <button type="submit" class="btn btn-primary" id="btn-generate" disabled>Generate Labels</button>
-            <button type="button" class="btn btn-secondary" id="btn-boxes" disabled>Generate Box Details</button>
-        </form>
+                <div class="dropzone" id="dz-qc">
+                    <input type="file" id="file-qc" webkitdirectory>
+                    <div class="dropzone-icon">📁</div>
+                    <div class="dropzone-title">QC Folder <span style="color:#8b949e;font-weight:400">(Optional)</span></div>
+                    <div class="dropzone-hint">Quality_Check*.csv for auto-filling MRP</div>
+                    <div class="filename" id="name-qc"></div>
+                </div>
 
-        <div class="status" id="status"></div>
+                <div class="btn-row">
+                    <button type="submit" class="btn btn-primary" id="btn-generate" disabled>Generate Labels</button>
+                    <button type="button" class="btn btn-blue" id="btn-boxes" disabled>Box Details</button>
+                </div>
+            </form>
+            <div class="status" id="status"></div>
+        </div>
 
-        <div class="divider"></div>
+        <div class="card">
+            <div class="card-title">Box Label Cropper</div>
+            <div class="card-desc">Upload a box labels PDF to crop each label into separate pages</div>
 
-        <h1>Box Label Cropper</h1>
-        <p class="subtitle">Upload a box labels PDF to crop each label into separate pages.</p>
+            <form id="cropForm">
+                <div class="dropzone" id="dz-boxlabels">
+                    <input type="file" id="file-boxlabels" accept=".pdf">
+                    <div class="dropzone-icon">✂️</div>
+                    <div class="dropzone-title">Box Labels PDF</div>
+                    <div class="dropzone-hint">PDF with box labels to crop</div>
+                    <div class="filename" id="name-boxlabels"></div>
+                </div>
 
-        <form id="cropForm">
-            <div class="dropzone" id="dz-boxlabels">
-                <input type="file" id="file-boxlabels" accept=".pdf">
-                <div class="dropzone-icon">✂️</div>
-                <div class="dropzone-title">Box Labels PDF</div>
-                <div class="dropzone-hint">PDF with rectangular box labels</div>
-                <div class="filename" id="name-boxlabels"></div>
-            </div>
+                <button type="submit" class="btn btn-purple" id="btn-crop" disabled>Crop Box Labels</button>
+            </form>
+            <div class="status" id="status-crop"></div>
+        </div>
 
-            <button type="submit" class="btn btn-primary" id="btn-crop" disabled style="background:#8957e5;">Crop Box Labels</button>
-        </form>
-
-        <div class="status" id="status-crop"></div>
+        <div class="footer">SKU Label Generator</div>
     </div>
 
     <script>
@@ -232,6 +280,7 @@
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             btnGenerate.disabled = true;
+            btnBoxes.disabled = true;
             statusEl.className = 'status loading';
             statusEl.innerHTML = '<span class="spinner"></span>Checking columns...';
 
@@ -239,7 +288,6 @@
             formData.append('consignment', fileConsignment.files[0]);
             formData.append('fsn', fileFsn.files[0]);
 
-            // Append QC folder files (if any)
             if (fileQc.files.length > 0) {
                 for (let i = 0; i < fileQc.files.length; i++) {
                     formData.append('qc', fileQc.files[i]);
@@ -247,7 +295,6 @@
             }
 
             try {
-                // Step 1: Check columns
                 const checkResp = await fetch('/check-columns', { method: 'POST', body: formData });
 
                 if (!checkResp.ok) {
@@ -262,10 +309,9 @@
                 const contentType = checkResp.headers.get('content-type') || '';
 
                 if (contentType.includes('application/json')) {
-                    // All columns present — proceed to generate
                     const data = await checkResp.json();
                     if (data.all_present) {
-                        statusEl.innerHTML = '<span class="spinner"></span>All columns present. Generating labels...';
+                        statusEl.innerHTML = '<span class="spinner"></span>Generating labels...';
                         const genResp = await fetch('/generate', { method: 'POST', body: formData });
 
                         if (!genResp.ok) {
@@ -293,7 +339,6 @@
                     }
                 }
 
-                // CSV returned — missing columns were added
                 const blob = await checkResp.blob();
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
@@ -305,7 +350,7 @@
                 URL.revokeObjectURL(url);
 
                 statusEl.className = 'status error';
-                statusEl.textContent = 'Missing columns added with defaults. Download the updated CSV, review and edit if needed, then re-upload it.';
+                statusEl.textContent = 'Missing columns added with defaults. Download, review, and re-upload.';
 
             } catch (err) {
                 statusEl.className = 'status error';
@@ -319,6 +364,7 @@
         btnBoxes.addEventListener('click', async () => {
             if (!fileConsignment.files[0]) return;
             btnBoxes.disabled = true;
+            btnGenerate.disabled = true;
             statusEl.className = 'status loading';
             statusEl.innerHTML = '<span class="spinner"></span>Generating box details...';
 
