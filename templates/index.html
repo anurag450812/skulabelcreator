@@ -144,6 +144,14 @@
                 <div class="filename" id="name-fsn"></div>
             </div>
 
+            <div class="dropzone" id="dz-qc">
+                <input type="file" id="file-qc" webkitdirectory>
+                <div class="dropzone-icon">📁</div>
+                <div class="dropzone-title">QC Folder (Optional)</div>
+                <div class="dropzone-hint">Folder with Quality_Check*.csv for auto-filling MRP</div>
+                <div class="filename" id="name-qc"></div>
+            </div>
+
             <button type="submit" class="btn btn-primary" id="btn-generate" disabled>Generate Labels</button>
         </form>
 
@@ -153,10 +161,13 @@
     <script>
         const fileConsignment = document.getElementById('file-consignment');
         const fileFsn = document.getElementById('file-fsn');
+        const fileQc = document.getElementById('file-qc');
         const nameConsignment = document.getElementById('name-consignment');
         const nameFsn = document.getElementById('name-fsn');
+        const nameQc = document.getElementById('name-qc');
         const dzConsignment = document.getElementById('dz-consignment');
         const dzFsn = document.getElementById('dz-fsn');
+        const dzQc = document.getElementById('dz-qc');
         const btnGenerate = document.getElementById('btn-generate');
         const statusEl = document.getElementById('status');
         const form = document.getElementById('uploadForm');
@@ -164,15 +175,18 @@
         function updateUI() {
             nameConsignment.textContent = fileConsignment.files[0]?.name || '';
             nameFsn.textContent = fileFsn.files[0]?.name || '';
+            nameQc.textContent = fileQc.files[0]?.name || '';
             dzConsignment.classList.toggle('has-file', !!fileConsignment.files[0]);
             dzFsn.classList.toggle('has-file', !!fileFsn.files[0]);
+            dzQc.classList.toggle('has-file', !!fileQc.files[0]);
             btnGenerate.disabled = !(fileConsignment.files[0] && fileFsn.files[0]);
         }
 
         fileConsignment.addEventListener('change', updateUI);
         fileFsn.addEventListener('change', updateUI);
+        fileQc.addEventListener('change', updateUI);
 
-        ['dz-consignment', 'dz-fsn'].forEach(id => {
+        ['dz-consignment', 'dz-fsn', 'dz-qc'].forEach(id => {
             const dz = document.getElementById(id);
             dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
             dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
@@ -188,6 +202,13 @@
             const formData = new FormData();
             formData.append('consignment', fileConsignment.files[0]);
             formData.append('fsn', fileFsn.files[0]);
+
+            // Append QC folder files (if any)
+            if (fileQc.files.length > 0) {
+                for (let i = 0; i < fileQc.files.length; i++) {
+                    formData.append('qc', fileQc.files[i]);
+                }
+            }
 
             try {
                 // Step 1: Check columns
