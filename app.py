@@ -451,52 +451,34 @@ def crop_box_labels():
         boxlabels.save(pdf_path)
         doc = fitz.open(pdf_path)
         output_doc = fitz.open()
-        padding = 2
 
         for page_num in range(len(doc)):
             page = doc[page_num]
-            drawings = page.get_drawings()
+            page_rect = page.rect
 
-            rects = []
-            for d in drawings:
-                for item in d.get("items", []):
-                    if item[0] == "re":
-                        r = fitz.Rect(item[1])
-                        if r.width > 50 and r.height > 50:
-                            rects.append(r)
-                    elif item[0] == "l" and len(d["items"]) == 4:
-                        pass
+            box_id_instances = page.search_for("Box ID")
 
-            if not rects:
-                for d in drawings:
-                    if len(d["items"]) == 4 and all(i[0] == "l" for i in d["items"]):
-                        points = []
-                        for i in d["items"]:
-                            points.append(fitz.Point(i[1]))
-                            points.append(fitz.Point(i[2]))
-                        xs = [p.x for p in points]
-                        ys = [p.y for p in points]
-                        if len(set(xs)) == 2 and len(set(ys)) == 2:
-                            r = fitz.Rect(min(xs), min(ys), max(xs), max(ys))
-                            if r.width > 50 and r.height > 50:
-                                rects.append(r)
+            if not box_id_instances:
+                new_page = output_doc.new_page(width=page_rect.width, height=page_rect.height)
+                new_page.show_pdf_page(new_page.rect, doc, page_num)
+                continue
 
-            if not rects:
-                rects = [page.rect]
+            if len(box_id_instances) == 1:
+                clip = page_rect
+                new_page = output_doc.new_page(width=clip.width, height=clip.height)
+                new_page.show_pdf_page(new_page.rect, doc, page_num, clip=clip)
+                continue
 
-            seen = set()
-            for r in rects:
-                key = (round(r.x0, 1), round(r.y0, 1), round(r.x1, 1), round(r.y1, 1))
-                if key in seen:
-                    continue
-                seen.add(key)
+            y_positions = sorted([r.y0 for r in box_id_instances])
 
-                clip = fitz.Rect(
-                    max(r.x0 - padding, 0),
-                    max(r.y0 - padding, 0),
-                    min(r.x1 + padding, page.rect.width),
-                    min(r.y1 + padding, page.rect.height),
-                )
+            boundaries = [0]
+            for i in range(len(y_positions) - 1):
+                mid = (y_positions[i] + y_positions[i + 1]) / 2
+                boundaries.append(mid)
+            boundaries.append(page_rect.height)
+
+            for i in range(len(boundaries) - 1):
+                clip = fitz.Rect(0, boundaries[i], page_rect.width, boundaries[i + 1])
                 new_page = output_doc.new_page(width=clip.width, height=clip.height)
                 new_page.show_pdf_page(new_page.rect, doc, page_num, clip=clip)
 
