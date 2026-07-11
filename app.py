@@ -10,8 +10,28 @@ import uuid
 import shutil
 import traceback
 
+import io
+import csv
+
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max
+
+REQUIRED_COLUMNS = [
+    'Product Name', 'FSN', 'SKU Id', 'Brand', 'Quantity Sent', 'MRP',
+    'Net Quantity', 'Generic Name', 'Month & Year of Manufacturing',
+    'Manufactured by / Marketed by', 'Customer Care Details',
+    'EAN/FSN/LID Barcode', 'Dimensions (cm)'
+]
+
+DEFAULT_VALUES = {
+    'Net Quantity': '1 unit',
+    'Generic Name': 'painting',
+    'Month & Year of Manufacturing': '26-Apr',
+    'Manufactured by / Marketed by': 'JB,MadhyaPradesh-474002',
+    'Customer Care Details': 'email us at- xidlzzzzzz@gmail.com',
+    'EAN/FSN/LID Barcode': '',
+    'Dimensions (cm)': '48*16*3 cm',
+}
 
 def take_barcode_screenshots(fsn_pdf, fsn_sku_map, output_dir):
     if not os.path.exists(output_dir):
@@ -214,6 +234,43 @@ def generate():
     try:
         output_path = generate_labels(csv_path, fsn_path)
         return send_file(output_path, as_attachment=True, download_name='Final_SKU_Labels.pdf')
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+@app.route('/check-columns', methods=['POST'])
+def check_columns():
+    if 'consignment' not in request.files:
+        return jsonify({'error': 'Consignment file is required'}), 400
+
+    consignment = request.files['consignment']
+    if not consignment.filename:
+        return jsonify({'error': 'Consignment file is required'}), 400
+
+    tmp_dir = tempfile.mkdtemp()
+    csv_path = os.path.join(tmp_dir, consignment.filename)
+
+    try:
+        consignment.save(csv_path)
+        df = pd.read_csv(csv_path)
+
+        existing_cols = [c.strip() for c in df.columns]
+        missing = [c for c in REQUIRED_COLUMNS if c not in existing_cols]
+
+        if not missing:
+            return jsonify({'missing': [], 'all_present': True})
+
+        for col in missing:
+            df[col] = DEFAULT_VALUES.get(col, '')
+
+        output_path = os.path.join(tmp_dir, 'Consignment_Details_Updated.csv')
+        df.to_csv(output_path, index=False)
+
+        return send_file(output_path, as_attachment=True,
+                         download_name='Consignment_Details_Updated.csv',
+                         mimetype='text/csv')
     except Exception as e:
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500

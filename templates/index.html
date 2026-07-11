@@ -183,39 +183,73 @@
             e.preventDefault();
             btnGenerate.disabled = true;
             statusEl.className = 'status loading';
-            statusEl.innerHTML = '<span class="spinner"></span>Generating labels...';
+            statusEl.innerHTML = '<span class="spinner"></span>Checking columns...';
 
             const formData = new FormData();
             formData.append('consignment', fileConsignment.files[0]);
             formData.append('fsn', fileFsn.files[0]);
 
             try {
-                const resp = await fetch('/generate', { method: 'POST', body: formData });
+                // Step 1: Check columns
+                const checkResp = await fetch('/check-columns', { method: 'POST', body: formData });
 
-                if (!resp.ok) {
+                if (!checkResp.ok) {
                     let msg = 'Server error';
                     try {
-                        const text = await resp.text();
-                        const data = JSON.parse(text);
+                        const data = await JSON.parse(await checkResp.text());
                         msg = data.error || msg;
-                    } catch {
-                        msg = msg;
-                    }
+                    } catch {}
                     throw new Error(msg);
                 }
 
-                const blob = await resp.blob();
+                const contentType = checkResp.headers.get('content-type') || '';
+
+                if (contentType.includes('application/json')) {
+                    // All columns present — proceed to generate
+                    const data = await checkResp.json();
+                    if (data.all_present) {
+                        statusEl.innerHTML = '<span class="spinner"></span>All columns present. Generating labels...';
+                        const genResp = await fetch('/generate', { method: 'POST', body: formData });
+
+                        if (!genResp.ok) {
+                            let msg = 'Server error';
+                            try {
+                                const errData = JSON.parse(await genResp.text());
+                                msg = errData.error || msg;
+                            } catch {}
+                            throw new Error(msg);
+                        }
+
+                        const blob = await genResp.blob();
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = 'Final_SKU_Labels.pdf';
+                        document.body.appendChild(a);
+                        a.click();
+                        a.remove();
+                        URL.revokeObjectURL(url);
+
+                        statusEl.className = 'status success';
+                        statusEl.textContent = 'Labels generated and downloaded!';
+                        return;
+                    }
+                }
+
+                // CSV returned — missing columns were added
+                const blob = await checkResp.blob();
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = 'Final_SKU_Labels.pdf';
+                a.download = 'Consignment_Details_Updated.csv';
                 document.body.appendChild(a);
                 a.click();
                 a.remove();
                 URL.revokeObjectURL(url);
 
-                statusEl.className = 'status success';
-                statusEl.textContent = 'Labels generated and downloaded!';
+                statusEl.className = 'status error';
+                statusEl.textContent = 'Missing columns added with defaults. Download the updated CSV, fill in MRP and other details, then re-upload it.';
+
             } catch (err) {
                 statusEl.className = 'status error';
                 statusEl.textContent = 'Error: ' + err.message;
