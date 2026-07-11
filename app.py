@@ -266,7 +266,7 @@ def generate():
 
     try:
         output_path = generate_labels(csv_path, fsn_path)
-        return send_file(output_path, as_attachment=True, download_name='Final_SKU_Labels.pdf')
+        return send_file(output_path, as_attachment=True, download_name='z_Final_SKU_Labels.pdf')
     except Exception as e:
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
@@ -341,7 +341,7 @@ def check_columns():
         df.to_csv(output_path, index=False)
 
         return send_file(output_path, as_attachment=True,
-                         download_name='Consignment_Details_Updated.csv',
+                         download_name='z_Consignment_Details_Updated.csv',
                          mimetype='text/csv')
     except Exception as e:
         traceback.print_exc()
@@ -427,7 +427,7 @@ def generate_boxes():
         out_df.to_csv(output_path, index=False)
 
         return send_file(output_path, as_attachment=True,
-                         download_name='Generated_Box_Details.csv',
+                         download_name='z_Generated_Box_Details.csv',
                          mimetype='text/csv')
     except Exception as e:
         traceback.print_exc()
@@ -550,7 +550,7 @@ def crop_box_labels():
         doc.close()
 
         return send_file(output_path, as_attachment=True,
-                         download_name='Cropped_Box_Labels.pdf',
+                         download_name='z_Cropped_Box_Labels.pdf',
                          mimetype='application/pdf')
     except Exception as e:
         traceback.print_exc()
