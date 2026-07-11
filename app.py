@@ -257,9 +257,9 @@ def check_columns():
         consignment.save(csv_path)
         df = pd.read_csv(csv_path)
 
-        # --- Fill MRP from QC folder if present and MRP is missing ---
+        # --- Fill MRP from QC folder if present ---
         qc_files = request.files.getlist('qc')
-        if qc_files and ('MRP' not in df.columns or df['MRP'].isna().all() or (df['MRP'].astype(str).str.strip() == '').all()):
+        if qc_files:
             for qc_file in qc_files:
                 if qc_file.filename and qc_file.filename.lower().startswith('quality_check') and qc_file.filename.lower().endswith('.csv'):
                     qc_path = os.path.join(tmp_dir, qc_file.filename)
@@ -280,9 +280,12 @@ def check_columns():
                                 if pd.notna(row[sku_col]) and pd.notna(row[mrp_col])
                             }
                             if 'SKU Id' in df.columns:
+                                if 'MRP' not in df.columns:
+                                    df['MRP'] = ''
                                 for idx, row in df.iterrows():
                                     sku_id = str(row['SKU Id']).strip().lower()
-                                    if sku_id in sku_mrp_map:
+                                    mrp_val = row.get('MRP', '')
+                                    if sku_id in sku_mrp_map and (pd.isna(mrp_val) or str(mrp_val).strip() == ''):
                                         df.at[idx, 'MRP'] = sku_mrp_map[sku_id]
                     except Exception:
                         pass
