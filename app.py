@@ -12,6 +12,8 @@ import traceback
 
 import io
 import csv
+from datetime import datetime, timedelta
+from calendar import month_abbr
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max
@@ -23,16 +25,46 @@ REQUIRED_COLUMNS = [
     'EAN/FSN/LID Barcode', 'Dimensions (cm)', 'Size'
 ]
 
-DEFAULT_VALUES = {
+STATIC_DEFAULTS = {
     'Net Quantity': '1 unit',
-    'Generic Name': 'painting',
-    'Month & Year of Manufacturing': '26-Apr',
-    'Manufactured by / Marketed by': 'JB,MadhyaPradesh-474002',
     'Customer Care Details': 'email us at- xidlzzzzzz@gmail.com',
     'EAN/FSN/LID Barcode': '',
-    'Dimensions (cm)': '48*16*3 cm',
     'Size': 'medium',
 }
+
+def get_last_month_str():
+    today = datetime.now()
+    first_of_this_month = today.replace(day=1)
+    last_month = first_of_this_month - timedelta(days=1)
+    return f"{last_month.day}-{month_abbr[last_month.month]}"
+
+def compute_dynamic_defaults(row, col):
+    sku_id = str(row.get('SKU Id', '')).strip().lower() if pd.notna(row.get('SKU Id', '')) else ''
+    brand = str(row.get('Brand', '')).strip().lower() if pd.notna(row.get('Brand', '')) else ''
+
+    if col == 'Manufactured by / Marketed by':
+        if 'jb creations' in brand:
+            return 'JB,MadhyaPradesh-474002'
+        elif 'xidlz' in brand:
+            return 'XIDLZ,MadhyaPradesh-474002'
+        return 'JB,MadhyaPradesh-474002'
+
+    if col == 'Dimensions (cm)':
+        if 'ch' in sku_id:
+            return '35*25*2 cm'
+        elif '0' in sku_id:
+            return '35*6*6 cm'
+        return '48*16*3 cm'
+
+    if col == 'Generic Name':
+        if '0' in sku_id:
+            return 'poster'
+        return 'painting'
+
+    if col == 'Month & Year of Manufacturing':
+        return get_last_month_str()
+
+    return STATIC_DEFAULTS.get(col, '')
 
 def take_barcode_screenshots(fsn_pdf, fsn_sku_map, output_dir):
     if not os.path.exists(output_dir):
@@ -299,7 +331,11 @@ def check_columns():
             return jsonify({'missing': [], 'all_present': True})
 
         for col in missing:
-            df[col] = DEFAULT_VALUES.get(col, '')
+            df[col] = ''
+
+        for idx, row in df.iterrows():
+            for col in missing:
+                df.at[idx, col] = compute_dynamic_defaults(row, col)
 
         output_path = os.path.join(tmp_dir, 'Consignment_Details_Updated.csv')
         df.to_csv(output_path, index=False)
