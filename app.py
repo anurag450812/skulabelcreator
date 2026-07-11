@@ -57,7 +57,7 @@ def compute_dynamic_defaults(row, col):
         return '48*16*3 cm'
 
     if col == 'Generic Name':
-        if '0' in sku_id:
+        if ',' in sku_id:
             return 'poster'
         return 'painting'
 
