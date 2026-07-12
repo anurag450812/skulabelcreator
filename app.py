@@ -268,7 +268,10 @@ def generate_labels(csv_path, fsn_pdf_path):
 def read_spreadsheet(filepath, header=None):
     ext = os.path.splitext(filepath)[1].lower()
     if ext == '.csv':
-        return pd.read_csv(filepath, header=header)
+        try:
+            return pd.read_csv(filepath, header=header, on_bad_lines='skip')
+        except Exception:
+            return pd.read_csv(filepath, header=header, on_bad_lines='skip', sep=';')
     return pd.read_excel(filepath, header=header)
 
 def process_meesho(filepath):
