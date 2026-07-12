@@ -265,8 +265,14 @@ def generate_labels(csv_path, fsn_pdf_path):
 
     return output_path
 
+def read_spreadsheet(filepath, header=None):
+    ext = os.path.splitext(filepath)[1].lower()
+    if ext == '.csv':
+        return pd.read_csv(filepath, header=header)
+    return pd.read_excel(filepath, header=header)
+
 def process_meesho(filepath):
-    raw = pd.read_excel(filepath, header=None)
+    raw = read_spreadsheet(filepath, header=None)
     header_row_idx = None
     for i, row in raw.iterrows():
         for val in row:
@@ -279,7 +285,7 @@ def process_meesho(filepath):
     if header_row_idx is None:
         raise ValueError(f"Could not find header row starting with '{MEESHO_HEADER_MARKER}'")
 
-    df = pd.read_excel(filepath, header=int(header_row_idx))
+    df = read_spreadsheet(filepath, header=int(header_row_idx))
     df.columns = df.columns.str.strip()
 
     source_cols = [c for c in MEESHO_COLUMNS_CONFIG.values() if c in df.columns]
