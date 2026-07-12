@@ -676,14 +676,15 @@ def extract_returns():
     tmp_dir = tempfile.mkdtemp()
 
     try:
-        frames = []
+        meesho_frames = []
+        flipkart_frames = []
 
         for meesho_file in meesho_files:
             if meesho_file and meesho_file.filename:
                 meesho_path = os.path.join(tmp_dir, meesho_file.filename)
                 meesho_file.save(meesho_path)
                 meesho_result = process_meesho(meesho_path)
-                frames.append(meesho_result)
+                meesho_frames.append(meesho_result)
 
         flipkart_files = request.files.getlist('flipkart')
         for fk_file in flipkart_files:
@@ -691,21 +692,31 @@ def extract_returns():
                 flipkart_path = os.path.join(tmp_dir, fk_file.filename)
                 fk_file.save(flipkart_path)
                 flipkart_result = process_flipkart(flipkart_path)
-                frames.append(flipkart_result)
+                flipkart_frames.append(flipkart_result)
 
         output_path = os.path.join(tmp_dir, 'Compiled_Returns.xlsx')
         columns = list(MEESHO_COLUMNS_CONFIG.keys())
+        blank = pd.DataFrame([[None]*len(columns)], columns=columns)
 
-        if frames:
+        def concat_with_blanks(dataframes):
+            if not dataframes:
+                return pd.DataFrame(columns=columns)
             parts = []
-            for i, f in enumerate(frames):
+            for i, f in enumerate(dataframes):
                 if i > 0:
-                    blank = pd.DataFrame([[None]*len(columns)], columns=columns)
                     parts.append(blank)
                 parts.append(f)
-            combined = pd.concat(parts, ignore_index=True)
+            return pd.concat(parts, ignore_index=True)
+
+        meesho_combined = concat_with_blanks(meesho_frames)
+        flipkart_combined = concat_with_blanks(flipkart_frames)
+
+        if not meesho_combined.empty and not flipkart_combined.empty:
+            combined = pd.concat([meesho_combined, flipkart_combined], ignore_index=True)
+        elif not meesho_combined.empty:
+            combined = meesho_combined
         else:
-            combined = pd.DataFrame(columns=columns)
+            combined = flipkart_combined
 
         combined.to_excel(output_path, index=False)
 
