@@ -50,10 +50,20 @@ MEESHO_FILTERS = {
     'Return Reason': 'Received wrong product (different color / size / product)',
 }
 
-# Flipkart config placeholder - add when criteria is defined
-FLIPKART_COLUMNS_CONFIG = {}
-FLIPKART_HEADER_MARKER = ''
-FLIPKART_FILTERS = {}
+# Flipkart config
+FLIPKART_COLUMNS_CONFIG = {
+    'SKU': 'SKU',
+    'Suborder Number': 'Order ID',
+    'Type of Return': 'Return Type',
+    'Delivered Date': 'Out For Delivery Date',
+    'AWB Number': 'Tracking ID',
+    'Return Reason': 'Return Reason',
+}
+FLIPKART_HEADER_MARKER = 'sku'
+FLIPKART_FILTERS = {
+    'Return Type': 'customer_return',
+    'Return Reason': 'MISSHIPMENT',
+}
 
 def get_last_month_str():
     today = datetime.now()
@@ -314,6 +324,27 @@ def process_meesho(filepath):
     output_cols = list(MEESHO_COLUMNS_CONFIG.keys())
     source_to_output = {v: k for k, v in MEESHO_COLUMNS_CONFIG.items()}
     result = df[list(MEESHO_COLUMNS_CONFIG.values())].rename(columns=source_to_output)
+    result = result.reset_index(drop=True)
+    return result
+
+def process_flipkart(filepath):
+    header_row_idx = find_header_row(filepath, FLIPKART_HEADER_MARKER)
+    if header_row_idx is None:
+        raise ValueError(f"Could not find header row containing '{FLIPKART_HEADER_MARKER}'")
+
+    df = read_spreadsheet(filepath, header=0, skiprows=header_row_idx)
+    df.columns = df.columns.str.strip()
+
+    missing_cols = [c for c in FLIPKART_COLUMNS_CONFIG.values() if c not in df.columns]
+    if missing_cols:
+        raise ValueError(f"Missing expected columns in Flipkart file: {', '.join(missing_cols)}")
+
+    for filter_col, filter_val in FLIPKART_FILTERS.items():
+        if filter_col in df.columns:
+            df = df[df[filter_col].astype(str).str.strip() == filter_val]
+
+    source_to_output = {v: k for k, v in FLIPKART_COLUMNS_CONFIG.items()}
+    result = df[list(FLIPKART_COLUMNS_CONFIG.values())].rename(columns=source_to_output)
     result = result.reset_index(drop=True)
     return result
 
@@ -636,10 +667,10 @@ def crop_box_labels():
 @app.route('/extract-returns', methods=['POST'])
 def extract_returns():
     meesho_files = request.files.getlist('meesho')
-    flipkart_file = request.files.get('flipkart')
 
     has_meesho = any(f.filename for f in meesho_files)
-    if not has_meesho and not flipkart_file:
+    has_flipkart = any(f.filename for f in request.files.getlist('flipkart'))
+    if not has_meesho and not has_flipkart:
         return jsonify({'error': 'At least one returns file is required'}), 400
 
     tmp_dir = tempfile.mkdtemp()
@@ -654,17 +685,27 @@ def extract_returns():
                 meesho_result = process_meesho(meesho_path)
                 frames.append(meesho_result)
 
-        if flipkart_file and flipkart_file.filename:
-            flipkart_path = os.path.join(tmp_dir, flipkart_file.filename)
-            flipkart_file.save(flipkart_path)
-            # TODO: process_flipkart() - add when criteria is defined
+        flipkart_files = request.files.getlist('flipkart')
+        for fk_file in flipkart_files:
+            if fk_file and fk_file.filename:
+                flipkart_path = os.path.join(tmp_dir, fk_file.filename)
+                fk_file.save(flipkart_path)
+                flipkart_result = process_flipkart(flipkart_path)
+                frames.append(flipkart_result)
 
         output_path = os.path.join(tmp_dir, 'Compiled_Returns.xlsx')
+        columns = list(MEESHO_COLUMNS_CONFIG.keys())
 
         if frames:
-            combined = pd.concat(frames, ignore_index=True)
+            parts = []
+            for i, f in enumerate(frames):
+                if i > 0:
+                    blank = pd.DataFrame([[None]*len(columns)], columns=columns)
+                    parts.append(blank)
+                parts.append(f)
+            combined = pd.concat(parts, ignore_index=True)
         else:
-            combined = pd.DataFrame(columns=list(MEESHO_COLUMNS_CONFIG.keys()))
+            combined = pd.DataFrame(columns=columns)
 
         combined.to_excel(output_path, index=False)
 
