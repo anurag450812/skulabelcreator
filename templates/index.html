@@ -21,6 +21,36 @@
             width: 100%;
             max-width: 560px;
         }
+        .mode-toggle {
+            display: flex;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 10px;
+            padding: 4px;
+            margin-bottom: 24px;
+        }
+        .mode-btn {
+            flex: 1;
+            padding: 10px 16px;
+            border: none;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            background: transparent;
+            color: #8b949e;
+            transition: background 0.2s, color 0.2s;
+        }
+        .mode-btn.active {
+            background: #238636;
+            color: #fff;
+        }
+        .mode-btn:not(.active):hover {
+            background: #21262d;
+            color: #e1e4e8;
+        }
+        .mode-section { display: none; }
+        .mode-section.active { display: block; }
         .header {
             text-align: center;
             margin-bottom: 32px;
@@ -182,6 +212,12 @@
             <p class="subtitle">Generate SKU labels, box details, and crop box labels</p>
         </div>
 
+        <div class="mode-toggle">
+            <button class="mode-btn active" data-mode="sku">SKU Labels</button>
+            <button class="mode-btn" data-mode="returns">Returns Extractor</button>
+        </div>
+
+        <div class="mode-section active" id="mode-sku">
         <div class="card">
             <div class="card-title">SKU Labels</div>
             <div class="card-desc">Upload consignment CSV and FSN label PDF to generate SKU label PDF</div>
@@ -236,11 +272,126 @@
             </form>
             <div class="status" id="status-crop"></div>
         </div>
+        </div>
+
+        <div class="mode-section" id="mode-returns">
+        <div class="card">
+            <div class="card-title">Returns Extractor</div>
+            <div class="card-desc">Upload Meesho and/or Flipkart returns Excel files to compile into one sheet</div>
+
+            <form id="returnsForm">
+                <div class="dropzone" id="dz-meesho">
+                    <input type="file" id="file-meesho" accept=".xlsx,.xls,.csv">
+                    <div class="dropzone-icon">🟠</div>
+                    <div class="dropzone-title">Meesho Returns</div>
+                    <div class="dropzone-hint">Excel &bull; completed_delivered*.xlsx</div>
+                    <div class="filename" id="name-meesho"></div>
+                </div>
+
+                <div class="dropzone" id="dz-flipkart">
+                    <input type="file" id="file-flipkart" accept=".xlsx,.xls,.csv">
+                    <div class="dropzone-icon">🔵</div>
+                    <div class="dropzone-title">Flipkart Returns</div>
+                    <div class="dropzone-hint">Excel &bull; off-returns-all*.xlsx</div>
+                    <div class="filename" id="name-flipkart"></div>
+                </div>
+
+                <button type="submit" class="btn btn-primary" id="btn-extract" disabled>Extract &amp; Compile</button>
+            </form>
+            <div class="status" id="status-returns"></div>
+        </div>
+        </div>
 
         <div class="footer">SKU Label Generator</div>
     </div>
 
     <script>
+        // --- Mode Toggle ---
+        const modeBtns = document.querySelectorAll('.mode-btn');
+        const modeSections = document.querySelectorAll('.mode-section');
+        modeBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                modeBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                const mode = btn.dataset.mode;
+                modeSections.forEach(s => s.classList.toggle('active', s.id === 'mode-' + mode));
+            });
+        });
+
+        // --- Returns Extractor ---
+        const fileMeesho = document.getElementById('file-meesho');
+        const fileFlipkart = document.getElementById('file-flipkart');
+        const nameMeesho = document.getElementById('name-meesho');
+        const nameFlipkart = document.getElementById('name-flipkart');
+        const dzMeesho = document.getElementById('dz-meesho');
+        const dzFlipkart = document.getElementById('dz-flipkart');
+        const btnExtract = document.getElementById('btn-extract');
+        const statusReturns = document.getElementById('status-returns');
+        const returnsForm = document.getElementById('returnsForm');
+
+        function updateReturnsUI() {
+            nameMeesho.textContent = fileMeesho.files[0]?.name || '';
+            nameFlipkart.textContent = fileFlipkart.files[0]?.name || '';
+            dzMeesho.classList.toggle('has-file', !!fileMeesho.files[0]);
+            dzFlipkart.classList.toggle('has-file', !!fileFlipkart.files[0]);
+            btnExtract.disabled = !(fileMeesho.files[0] || fileFlipkart.files[0]);
+        }
+
+        fileMeesho.addEventListener('change', updateReturnsUI);
+        fileFlipkart.addEventListener('change', updateReturnsUI);
+
+        ['dz-meesho', 'dz-flipkart'].forEach(id => {
+            const dz = document.getElementById(id);
+            dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
+            dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+            dz.addEventListener('drop', () => dz.classList.remove('dragover'));
+        });
+
+        returnsForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!fileMeesho.files[0] && !fileFlipkart.files[0]) return;
+            btnExtract.disabled = true;
+            statusReturns.className = 'status loading';
+            statusReturns.innerHTML = '<span class="spinner"></span>Extracting returns data...';
+
+            const formData = new FormData();
+            if (fileMeesho.files[0]) formData.append('meesho', fileMeesho.files[0]);
+            if (fileFlipkart.files[0]) formData.append('flipkart', fileFlipkart.files[0]);
+
+            try {
+                const resp = await fetch('/extract-returns', { method: 'POST', body: formData });
+
+                if (!resp.ok) {
+                    let msg = 'Server error';
+                    try {
+                        const data = JSON.parse(await resp.text());
+                        msg = data.error || msg;
+                    } catch {}
+                    throw new Error(msg);
+                }
+
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'z_Compiled_Returns.xlsx';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+
+                statusReturns.className = 'status success';
+                statusReturns.textContent = 'Returns compiled and downloaded!';
+            } catch (err) {
+                statusReturns.className = 'status error';
+                statusReturns.textContent = 'Error: ' + err.message;
+            } finally {
+                btnExtract.disabled = false;
+                updateReturnsUI();
+            }
+        });
+
+        // --- SKU Label Generator (existing) ---
         const fileConsignment = document.getElementById('file-consignment');
         const fileFsn = document.getElementById('file-fsn');
         const fileQc = document.getElementById('file-qc');

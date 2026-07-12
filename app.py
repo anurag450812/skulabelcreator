@@ -32,6 +32,29 @@ STATIC_DEFAULTS = {
     'Size': 'medium',
 }
 
+# --- Editable column mappings for returns processing ---
+# Keys = internal names used in output; Values = source column names in input files
+MEESHO_COLUMNS_CONFIG = {
+    'SKU': 'SKU',
+    'Suborder Number': 'Suborder Number',
+    'Type of Return': 'Type of Return',
+    'Delivered Date': 'Delivered Date',
+    'AWB Number': 'AWB Number',
+    'Return Reason': 'Return Reason',
+}
+
+MEESHO_HEADER_MARKER = 'S No'
+
+MEESHO_FILTERS = {
+    'Type of Return': 'Customer Return',
+    'Return Reason': 'Received wrong product (different color / size / product)',
+}
+
+# Flipkart config placeholder - add when criteria is defined
+FLIPKART_COLUMNS_CONFIG = {}
+FLIPKART_HEADER_MARKER = ''
+FLIPKART_FILTERS = {}
+
 def get_last_month_str():
     today = datetime.now()
     first_of_this_month = today.replace(day=1)
@@ -241,6 +264,38 @@ def generate_labels(csv_path, fsn_pdf_path):
     shutil.rmtree(tmp_dir, ignore_errors=True)
 
     return output_path
+
+def process_meesho(filepath):
+    raw = pd.read_excel(filepath, header=None)
+    header_row_idx = None
+    for i, row in raw.iterrows():
+        for val in row:
+            if pd.notna(val) and str(val).strip() == MEESHO_HEADER_MARKER:
+                header_row_idx = i
+                break
+        if header_row_idx is not None:
+            break
+
+    if header_row_idx is None:
+        raise ValueError(f"Could not find header row starting with '{MEESHO_HEADER_MARKER}'")
+
+    df = pd.read_excel(filepath, header=int(header_row_idx))
+    df.columns = df.columns.str.strip()
+
+    source_cols = [c for c in MEESHO_COLUMNS_CONFIG.values() if c in df.columns]
+    missing_cols = [c for c in MEESHO_COLUMNS_CONFIG.values() if c not in df.columns]
+    if missing_cols:
+        raise ValueError(f"Missing expected columns in Meesho file: {', '.join(missing_cols)}")
+
+    for filter_col, filter_val in MEESHO_FILTERS.items():
+        if filter_col in df.columns:
+            df = df[df[filter_col].astype(str).str.strip() == filter_val]
+
+    output_cols = list(MEESHO_COLUMNS_CONFIG.keys())
+    source_to_output = {v: k for k, v in MEESHO_COLUMNS_CONFIG.items()}
+    result = df[list(MEESHO_COLUMNS_CONFIG.values())].rename(columns=source_to_output)
+    result = result.reset_index(drop=True)
+    return result
 
 @app.route('/')
 def index():
@@ -557,6 +612,49 @@ def crop_box_labels():
         return jsonify({'error': str(e)}), 500
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+@app.route('/extract-returns', methods=['POST'])
+def extract_returns():
+    meesho_file = request.files.get('meesho')
+    flipkart_file = request.files.get('flipkart')
+
+    if not meesho_file and not flipkart_file:
+        return jsonify({'error': 'At least one returns file is required'}), 400
+
+    tmp_dir = tempfile.mkdtemp()
+
+    try:
+        frames = []
+
+        if meesho_file and meesho_file.filename:
+            meesho_path = os.path.join(tmp_dir, meesho_file.filename)
+            meesho_file.save(meesho_path)
+            meesho_result = process_meesho(meesho_path)
+            frames.append(meesho_result)
+
+        if flipkart_file and flipkart_file.filename:
+            flipkart_path = os.path.join(tmp_dir, flipkart_file.filename)
+            flipkart_file.save(flipkart_path)
+            # TODO: process_flipkart() - add when criteria is defined
+
+        output_path = os.path.join(tmp_dir, 'Compiled_Returns.xlsx')
+
+        if frames:
+            combined = pd.concat(frames, ignore_index=True)
+        else:
+            combined = pd.DataFrame(columns=list(MEESHO_COLUMNS_CONFIG.keys()))
+
+        combined.to_excel(output_path, index=False)
+
+        return send_file(output_path, as_attachment=True,
+                         download_name='z_Compiled_Returns.xlsx',
+                         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
