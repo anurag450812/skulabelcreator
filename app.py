@@ -265,31 +265,41 @@ def generate_labels(csv_path, fsn_pdf_path):
 
     return output_path
 
-def read_spreadsheet(filepath, header=None):
+def read_spreadsheet(filepath, header=None, skiprows=None):
     ext = os.path.splitext(filepath)[1].lower()
     if ext == '.csv':
+        kwargs = {'on_bad_lines': 'skip'}
+        if skiprows is not None:
+            kwargs['skiprows'] = skiprows
+        if header is not None:
+            kwargs['header'] = header
         try:
-            return pd.read_csv(filepath, header=header, on_bad_lines='skip')
+            return pd.read_csv(filepath, **kwargs)
         except Exception:
-            return pd.read_csv(filepath, header=header, on_bad_lines='skip', sep=';')
-    return pd.read_excel(filepath, header=header)
+            kwargs['sep'] = ';'
+            return pd.read_csv(filepath, **kwargs)
+    kwargs = {}
+    if header is not None:
+        kwargs['header'] = header
+    if skiprows is not None:
+        kwargs['skiprows'] = skiprows
+    return pd.read_excel(filepath, **kwargs)
+
+def find_header_row(filepath, marker):
+    ext = os.path.splitext(filepath)[1].lower()
+    marker_lower = marker.strip().lower()
+    with open(filepath, 'r', encoding='utf-8-sig') as f:
+        for line_num, line in enumerate(f):
+            if marker_lower in line.strip().lower():
+                return line_num
+    return None
 
 def process_meesho(filepath):
-    raw = read_spreadsheet(filepath, header=None)
-    marker = MEESHO_HEADER_MARKER.strip().lower()
-    header_row_idx = None
-    for i, row in raw.iterrows():
-        for val in row:
-            if pd.notna(val) and marker in str(val).strip().lower():
-                header_row_idx = i
-                break
-        if header_row_idx is not None:
-            break
-
+    header_row_idx = find_header_row(filepath, MEESHO_HEADER_MARKER)
     if header_row_idx is None:
         raise ValueError(f"Could not find header row containing '{MEESHO_HEADER_MARKER}'")
 
-    df = read_spreadsheet(filepath, header=int(header_row_idx))
+    df = read_spreadsheet(filepath, header=0, skiprows=header_row_idx)
     df.columns = df.columns.str.strip()
 
     source_cols = [c for c in MEESHO_COLUMNS_CONFIG.values() if c in df.columns]
