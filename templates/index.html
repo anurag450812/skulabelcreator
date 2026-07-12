@@ -202,6 +202,47 @@
             font-size: 11px;
             color: #484f58;
         }
+        .file-list {
+            margin-bottom: 8px;
+        }
+        .file-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            margin-bottom: 4px;
+            font-size: 12px;
+        }
+        .file-item-name {
+            color: #e1e4e8;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            flex: 1;
+        }
+        .file-item-badge {
+            font-size: 10px;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 4px;
+            margin-left: 8px;
+            flex-shrink: 0;
+        }
+        .badge-meesho { background: #3d2b00; color: #f0883e; }
+        .badge-flipkart { background: #0c2d6b; color: #58a6ff; }
+        .file-item-remove {
+            background: none;
+            border: none;
+            color: #f85149;
+            cursor: pointer;
+            font-size: 14px;
+            margin-left: 8px;
+            padding: 0 4px;
+            flex-shrink: 0;
+        }
     </style>
 </head>
 <body>
@@ -280,21 +321,15 @@
             <div class="card-desc">Upload Meesho and/or Flipkart returns Excel files to compile into one sheet</div>
 
             <form id="returnsForm">
-                <div class="dropzone" id="dz-meesho">
-                    <input type="file" id="file-meesho" accept=".xlsx,.xls,.csv" multiple>
-                    <div class="dropzone-icon">🟠</div>
-                    <div class="dropzone-title">Meesho Returns</div>
-                    <div class="dropzone-hint">CSV &bull; completed_delivered*.csv &bull; select multiple files</div>
-                    <div class="filename" id="name-meesho"></div>
+                <div class="dropzone" id="dz-all-returns">
+                    <input type="file" id="file-all-returns" accept=".xlsx,.xls,.csv" multiple>
+                    <div class="dropzone-icon">📦</div>
+                    <div class="dropzone-title">Drop Returns Files</div>
+                    <div class="dropzone-hint">Auto-classifies by filename &bull; completed_delivered* &bull; off-returns-all*</div>
                 </div>
 
-                <div class="dropzone" id="dz-flipkart">
-                    <input type="file" id="file-flipkart" accept=".xlsx,.xls,.csv">
-                    <div class="dropzone-icon">🔵</div>
-                    <div class="dropzone-title">Flipkart Returns</div>
-                    <div class="dropzone-hint">Excel &bull; off-returns-all*.xlsx</div>
-                    <div class="filename" id="name-flipkart"></div>
-                </div>
+                <div class="file-list" id="meesho-file-list"></div>
+                <div class="file-list" id="flipkart-file-list"></div>
 
                 <button type="submit" class="btn btn-primary" id="btn-extract" disabled>Extract &amp; Compile</button>
             </form>
@@ -319,47 +354,84 @@
         });
 
         // --- Returns Extractor ---
-        const fileMeesho = document.getElementById('file-meesho');
-        const fileFlipkart = document.getElementById('file-flipkart');
-        const nameMeesho = document.getElementById('name-meesho');
-        const nameFlipkart = document.getElementById('name-flipkart');
-        const dzMeesho = document.getElementById('dz-meesho');
-        const dzFlipkart = document.getElementById('dz-flipkart');
+        const fileAllReturns = document.getElementById('file-all-returns');
+        const dzAllReturns = document.getElementById('dz-all-returns');
+        const meeshoFileList = document.getElementById('meesho-file-list');
+        const flipkartFileList = document.getElementById('flipkart-file-list');
         const btnExtract = document.getElementById('btn-extract');
         const statusReturns = document.getElementById('status-returns');
         const returnsForm = document.getElementById('returnsForm');
 
-        function updateReturnsUI() {
-            const mc = fileMeesho.files.length;
-            nameMeesho.textContent = mc > 0 ? `${mc} file${mc > 1 ? 's' : ''} selected` : '';
-            nameFlipkart.textContent = fileFlipkart.files[0]?.name || '';
-            dzMeesho.classList.toggle('has-file', mc > 0);
-            dzFlipkart.classList.toggle('has-file', !!fileFlipkart.files[0]);
-            btnExtract.disabled = !(mc > 0 || fileFlipkart.files[0]);
+        let meeshoFiles = [];
+        let flipkartFiles = [];
+
+        function classifyFile(file) {
+            const name = file.name.toLowerCase();
+            if (name.startsWith('completed_delivered') || name.startsWith('completed delivered')) return 'meesho';
+            if (name.startsWith('off-returns-all') || name.startsWith('off_returns_all') || name.startsWith('off returns all')) return 'flipkart';
+            if (name.endsWith('.csv')) return 'meesho';
+            return 'flipkart';
         }
 
-        fileMeesho.addEventListener('change', updateReturnsUI);
-        fileFlipkart.addEventListener('change', updateReturnsUI);
+        function addFiles(fileArray) {
+            for (const file of fileArray) {
+                const type = classifyFile(file);
+                if (type === 'meesho') meeshoFiles.push(file);
+                else flipkartFiles.push(file);
+            }
+            renderFileLists();
+        }
 
-        ['dz-meesho', 'dz-flipkart'].forEach(id => {
-            const dz = document.getElementById(id);
-            dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
-            dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
-            dz.addEventListener('drop', () => dz.classList.remove('dragover'));
+        function removeFile(type, index) {
+            if (type === 'meesho') meeshoFiles.splice(index, 1);
+            else flipkartFiles.splice(index, 1);
+            renderFileLists();
+        }
+
+        function renderFileLists() {
+            meeshoFileList.innerHTML = meeshoFiles.map((f, i) =>
+                `<div class="file-item"><span class="file-item-name">${f.name}</span><span class="file-item-badge badge-meesho">Meesho</span><button class="file-item-remove" data-type="meesho" data-idx="${i}">&times;</button></div>`
+            ).join('');
+            flipkartFileList.innerHTML = flipkartFiles.map((f, i) =>
+                `<div class="file-item"><span class="file-item-name">${f.name}</span><span class="file-item-badge badge-flipkart">Flipkart</span><button class="file-item-remove" data-type="flipkart" data-idx="${i}">&times;</button></div>`
+            ).join('');
+            btnExtract.disabled = !(meeshoFiles.length > 0 || flipkartFiles.length > 0);
+        }
+
+        meeshoFileList.addEventListener('click', e => {
+            if (e.target.classList.contains('file-item-remove')) {
+                removeFile(e.target.dataset.type, parseInt(e.target.dataset.idx));
+            }
+        });
+        flipkartFileList.addEventListener('click', e => {
+            if (e.target.classList.contains('file-item-remove')) {
+                removeFile(e.target.dataset.type, parseInt(e.target.dataset.idx));
+            }
+        });
+
+        fileAllReturns.addEventListener('change', () => {
+            addFiles(Array.from(fileAllReturns.files));
+            fileAllReturns.value = '';
+        });
+
+        dzAllReturns.addEventListener('dragover', e => { e.preventDefault(); dzAllReturns.classList.add('dragover'); });
+        dzAllReturns.addEventListener('dragleave', () => dzAllReturns.classList.remove('dragover'));
+        dzAllReturns.addEventListener('drop', e => {
+            e.preventDefault();
+            dzAllReturns.classList.remove('dragover');
+            addFiles(Array.from(e.dataTransfer.files));
         });
 
         returnsForm.addEventListener('submit', async (e) => {
             e.preventDefault();
-            if (!fileMeesho.files.length && !fileFlipkart.files[0]) return;
+            if (!meeshoFiles.length && !flipkartFiles.length) return;
             btnExtract.disabled = true;
             statusReturns.className = 'status loading';
             statusReturns.innerHTML = '<span class="spinner"></span>Extracting returns data...';
 
             const formData = new FormData();
-            for (let i = 0; i < fileMeesho.files.length; i++) {
-                formData.append('meesho', fileMeesho.files[i]);
-            }
-            if (fileFlipkart.files[0]) formData.append('flipkart', fileFlipkart.files[0]);
+            meeshoFiles.forEach(f => formData.append('meesho', f));
+            flipkartFiles.forEach(f => formData.append('flipkart', f));
 
             try {
                 const resp = await fetch('/extract-returns', { method: 'POST', body: formData });
@@ -390,7 +462,7 @@
                 statusReturns.textContent = 'Error: ' + err.message;
             } finally {
                 btnExtract.disabled = false;
-                updateReturnsUI();
+                renderFileLists();
             }
         });
 
