@@ -635,10 +635,11 @@ def crop_box_labels():
 
 @app.route('/extract-returns', methods=['POST'])
 def extract_returns():
-    meesho_file = request.files.get('meesho')
+    meesho_files = request.files.getlist('meesho')
     flipkart_file = request.files.get('flipkart')
 
-    if not meesho_file and not flipkart_file:
+    has_meesho = any(f.filename for f in meesho_files)
+    if not has_meesho and not flipkart_file:
         return jsonify({'error': 'At least one returns file is required'}), 400
 
     tmp_dir = tempfile.mkdtemp()
@@ -646,11 +647,12 @@ def extract_returns():
     try:
         frames = []
 
-        if meesho_file and meesho_file.filename:
-            meesho_path = os.path.join(tmp_dir, meesho_file.filename)
-            meesho_file.save(meesho_path)
-            meesho_result = process_meesho(meesho_path)
-            frames.append(meesho_result)
+        for meesho_file in meesho_files:
+            if meesho_file and meesho_file.filename:
+                meesho_path = os.path.join(tmp_dir, meesho_file.filename)
+                meesho_file.save(meesho_path)
+                meesho_result = process_meesho(meesho_path)
+                frames.append(meesho_result)
 
         if flipkart_file and flipkart_file.filename:
             flipkart_path = os.path.join(tmp_dir, flipkart_file.filename)
