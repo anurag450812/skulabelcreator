@@ -43,7 +43,7 @@ MEESHO_COLUMNS_CONFIG = {
     'Return Reason': 'Return Reason',
 }
 
-MEESHO_HEADER_MARKER = 'S No'
+MEESHO_HEADER_MARKER = 'sku'
 
 MEESHO_FILTERS = {
     'Type of Return': 'Customer Return',
@@ -276,17 +276,18 @@ def read_spreadsheet(filepath, header=None):
 
 def process_meesho(filepath):
     raw = read_spreadsheet(filepath, header=None)
+    marker = MEESHO_HEADER_MARKER.strip().lower()
     header_row_idx = None
     for i, row in raw.iterrows():
         for val in row:
-            if pd.notna(val) and str(val).strip() == MEESHO_HEADER_MARKER:
+            if pd.notna(val) and marker in str(val).strip().lower():
                 header_row_idx = i
                 break
         if header_row_idx is not None:
             break
 
     if header_row_idx is None:
-        raise ValueError(f"Could not find header row starting with '{MEESHO_HEADER_MARKER}'")
+        raise ValueError(f"Could not find header row containing '{MEESHO_HEADER_MARKER}'")
 
     df = read_spreadsheet(filepath, header=int(header_row_idx))
     df.columns = df.columns.str.strip()
