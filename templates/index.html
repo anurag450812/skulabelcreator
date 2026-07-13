@@ -257,6 +257,26 @@
             color: #e1e4e8;
             white-space: pre-wrap;
         }
+        .sort-btn {
+            padding: 4px 10px;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            background: #161b22;
+            color: #8b949e;
+            font-size: 11px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s, border-color 0.15s;
+        }
+        .sort-btn:hover {
+            background: #21262d;
+            color: #e1e4e8;
+        }
+        .sort-btn.active {
+            background: #238636;
+            color: #fff;
+            border-color: #238636;
+        }
     </style>
 </head>
 <body>
@@ -386,6 +406,13 @@
             <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
                 <div id="salary-search-count" style="font-size:12px;color:#8b949e;flex:1"></div>
                 <button type="button" class="btn btn-blue" id="btn-copy-results" style="display:none;padding:6px 12px;font-size:11px">Copy All</button>
+            </div>
+            <div id="salary-sort-bar" style="display:none;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+                <button type="button" class="sort-btn active" data-sort="original">Original</button>
+                <button type="button" class="sort-btn" data-sort="az">A → Z</button>
+                <button type="button" class="sort-btn" data-sort="za">Z → A</button>
+                <button type="button" class="sort-btn" data-sort="words-asc">Shortest</button>
+                <button type="button" class="sort-btn" data-sort="words-desc">Longest</button>
             </div>
             <div id="salary-search-results" style="max-height:400px;overflow-y:auto"></div>
         </div>
@@ -758,10 +785,13 @@
         const salarySearchCount = document.getElementById('salary-search-count');
         const salarySearchResults = document.getElementById('salary-search-results');
         const btnCopyResults = document.getElementById('btn-copy-results');
+        const salarySortBar = document.getElementById('salary-sort-bar');
+        const sortBtns = salarySortBar.querySelectorAll('.sort-btn');
 
         let waRawText = '';
         let waReady = false;
         let lastMatches = [];
+        let currentSort = 'original';
         const MAX_DISPLAY = 200;
 
         const WA_DATE_RE = /^(\d{1,2}\/\d{1,2}\/\d{2,4}),\s+(\d{1,2}:\d{2}\s+[ap]m)\s+-\s+/;
@@ -826,6 +856,7 @@
             salarySearchResults.innerHTML = '';
             salarySearchCount.textContent = '';
             btnCopyResults.style.display = 'none';
+            salarySortBar.style.display = 'none';
             lastMatches = [];
         }
 
@@ -891,6 +922,46 @@
             statusWhatsapp.textContent = 'Chat cleared.';
         });
 
+        function getSortedMatches(matches, sort) {
+            if (sort === 'original') return matches.slice();
+            const arr = matches.slice();
+            if (sort === 'az') arr.sort((a, b) => a.localeCompare(b));
+            else if (sort === 'za') arr.sort((a, b) => b.localeCompare(a));
+            else if (sort === 'words-asc') arr.sort((a, b) => a.split(/\s+/).length - b.split(/\s+/).length);
+            else if (sort === 'words-desc') arr.sort((a, b) => b.split(/\s+/).length - a.split(/\s+/).length);
+            return arr;
+        }
+
+        function renderResults() {
+            salarySearchResults.textContent = '';
+            if (!lastMatches.length) return;
+            const sorted = getSortedMatches(lastMatches, currentSort);
+            const display = sorted.length > MAX_DISPLAY ? sorted.slice(0, MAX_DISPLAY) : sorted;
+            const frag = document.createDocumentFragment();
+            for (const line of display) {
+                const div = document.createElement('div');
+                div.className = 'search-result-item';
+                div.textContent = line;
+                frag.appendChild(div);
+            }
+            salarySearchResults.appendChild(frag);
+            if (sorted.length > MAX_DISPLAY) {
+                const more = document.createElement('div');
+                more.style.cssText = 'color:#8b949e;font-size:12px;text-align:center;padding:12px';
+                more.textContent = `Showing ${MAX_DISPLAY} of ${sorted.length} lines. Narrow your search to see more.`;
+                salarySearchResults.appendChild(more);
+            }
+        }
+
+        sortBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                sortBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentSort = btn.dataset.sort;
+                renderResults();
+            });
+        });
+
         btnSalarySearch.addEventListener('click', () => {
             const term = salarySearchTerm.value.trim();
             if (!term || !waReady) return;
@@ -898,6 +969,7 @@
             salarySearchCount.textContent = 'Searching...';
             salarySearchResults.textContent = '';
             btnCopyResults.style.display = 'none';
+            salarySortBar.style.display = 'none';
 
             const lower = term.toLowerCase();
             const allLines = waRawText.split('\n');
@@ -915,22 +987,10 @@
             }
 
             btnCopyResults.style.display = '';
-            const display = lastMatches.length > MAX_DISPLAY ? lastMatches.slice(0, MAX_DISPLAY) : lastMatches;
-            const frag = document.createDocumentFragment();
-            for (const line of display) {
-                const div = document.createElement('div');
-                div.className = 'search-result-item';
-                div.textContent = line;
-                frag.appendChild(div);
-            }
-            salarySearchResults.appendChild(frag);
-
-            if (lastMatches.length > MAX_DISPLAY) {
-                const more = document.createElement('div');
-                more.style.cssText = 'color:#8b949e;font-size:12px;text-align:center;padding:12px';
-                more.textContent = `Showing ${MAX_DISPLAY} of ${lastMatches.length} lines. Narrow your search to see more.`;
-                salarySearchResults.appendChild(more);
-            }
+            salarySortBar.style.display = 'flex';
+            currentSort = 'original';
+            sortBtns.forEach(b => b.classList.toggle('active', b.dataset.sort === 'original'));
+            renderResults();
             btnSalarySearch.disabled = false;
         });
 
@@ -940,14 +1000,15 @@
 
         btnCopyResults.addEventListener('click', async () => {
             if (!lastMatches.length) return;
+            const sorted = getSortedMatches(lastMatches, currentSort);
             try {
-                await navigator.clipboard.writeText(lastMatches.join('\n'));
+                await navigator.clipboard.writeText(sorted.join('\n'));
                 const orig = btnCopyResults.textContent;
                 btnCopyResults.textContent = 'Copied!';
                 setTimeout(() => btnCopyResults.textContent = orig, 1500);
             } catch {
                 const ta = document.createElement('textarea');
-                ta.value = lastMatches.join('\n');
+                ta.value = sorted.join('\n');
                 document.body.appendChild(ta);
                 ta.select();
                 document.execCommand('copy');
