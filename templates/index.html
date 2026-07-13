@@ -790,25 +790,24 @@
 
         let waRawText = '';
         let waMessages = [];
+        let waReady = false;
+        const MAX_DISPLAY = 200;
 
         const WA_DATE_RE = /^(\d{1,2}\/\d{1,2}\/\d{2,4}),\s+(\d{1,2}:\d{2}\s+[ap]m)\s+-\s+/;
 
         function parseWADate(d, t) {
-            for (const fmt of ['%d/%m/%y, %I:%M %p', '%d/%m/%Y, %I:%M %p']) {
-                const parts = d.split('/');
-                if (parts.length !== 3) continue;
-                let [dd, mm, yy] = parts;
-                if (yy.length === 2) yy = '20' + yy;
-                const h = parseInt(t.split(':')[0]);
-                const mi = t.split(':')[1].split(' ')[0];
-                const ap = t.toLowerCase().includes('pm') ? 'PM' : 'AM';
-                let hh = h;
-                if (ap === 'PM' && h !== 12) hh += 12;
-                if (ap === 'AM' && h === 12) hh = 0;
-                const dt = new Date(parseInt(yy), parseInt(mm) - 1, parseInt(dd), hh, parseInt(mi));
-                if (!isNaN(dt.getTime())) return dt;
-            }
-            return null;
+            const parts = d.split('/');
+            if (parts.length !== 3) return null;
+            let [dd, mm, yy] = parts;
+            if (yy.length === 2) yy = '20' + yy;
+            const h = parseInt(t.split(':')[0]);
+            const mi = t.split(':')[1].split(' ')[0];
+            const ap = t.toLowerCase().includes('pm');
+            let hh = h;
+            if (ap && h !== 12) hh += 12;
+            if (!ap && h === 12) hh = 0;
+            const dt = new Date(parseInt(yy), parseInt(mm) - 1, parseInt(dd), hh, parseInt(mi));
+            return isNaN(dt.getTime()) ? null : dt;
         }
 
         function parseWAMessages(text) {
@@ -827,14 +826,16 @@
                     cur = {
                         dateStr: m[1], timeStr: m[2],
                         dt: parseWADate(m[1], m[2]),
-                        sender, lines: [body], lineNums: [i + 1]
+                        sender, lines: [body], lineNums: [i + 1],
+                        fullText: body.toLowerCase()
                     };
                 } else {
                     if (cur) {
                         cur.lines.push(line);
                         cur.lineNums.push(i + 1);
+                        cur.fullText += ' ' + line.toLowerCase();
                     } else {
-                        cur = { dateStr: '', timeStr: '', dt: null, sender: '', lines: [line], lineNums: [i + 1] };
+                        cur = { dateStr: '', timeStr: '', dt: null, sender: '', lines: [line], lineNums: [i + 1], fullText: line.toLowerCase() };
                     }
                 }
             }
@@ -843,6 +844,59 @@
         }
 
         function escHtml(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+        function trimAndDownload(text, months) {
+            const msgs = parseWAMessages(text);
+            const cutoff = new Date();
+            cutoff.setDate(cutoff.getDate() - months * 30);
+            const keep = new Set();
+            for (const msg of msgs) {
+                if (!msg.dt || msg.dt >= cutoff) {
+                    for (const ln of msg.lineNums) keep.add(ln);
+                }
+            }
+            const allLines = text.split('\n');
+            const trimmed = allLines.filter((_, i) => keep.has(i + 1));
+            const removed = allLines.length - trimmed.length;
+            if (removed === 0) return 0;
+            const blob = new Blob([trimmed.join('\n')], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'chat_trimmed.txt';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+            return removed;
+        }
+
+        function hasOldData(text) {
+            const cutoff = new Date();
+            cutoff.setDate(cutoff.getDate() - 1.5 * 30);
+            const lines = text.split('\n');
+            for (const line of lines) {
+                const m = line.match(WA_DATE_RE);
+                if (m) {
+                    const dt = parseWADate(m[1], m[2]);
+                    if (dt && dt < cutoff) return true;
+                }
+            }
+            return false;
+        }
+
+        function showSearchCard() {
+            salarySearchCard.style.display = '';
+            btnSalarySearch.disabled = false;
+            salarySearchCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        function hideAllCards() {
+            salarySearchCard.style.display = 'none';
+            salaryTrimCard.style.display = 'none';
+            salarySearchResults.innerHTML = '';
+            salarySearchCount.textContent = '';
+        }
 
         fileWhatsapp.addEventListener('change', () => {
             nameWhatsapp.textContent = fileWhatsapp.files[0]?.name || '';
@@ -864,13 +918,24 @@
             try {
                 waRawText = await fileWhatsapp.files[0].text();
                 waMessages = parseWAMessages(waRawText);
-                statusWhatsapp.className = 'status success';
-                statusWhatsapp.textContent = `Loaded ${waMessages.length} messages from ${fileWhatsapp.files[0].name}`;
-                salarySearchCard.style.display = '';
-                salaryTrimCard.style.display = '';
-                btnSalarySearch.disabled = false;
-                btnDeleteChat.style.display = '';
-                btnUploadChat.style.display = 'none';
+
+                if (hasOldData(waRawText)) {
+                    const removed = trimAndDownload(waRawText, 1.5);
+                    statusWhatsapp.className = 'status error';
+                    statusWhatsapp.innerHTML = `File has data older than 1.5 months. Trimmed version downloaded (${removed} lines removed).<br><b>Review it, then re-upload the trimmed file.</b>`;
+                    hideAllCards();
+                    btnDeleteChat.style.display = '';
+                    btnUploadChat.style.display = 'none';
+                    waReady = false;
+                } else {
+                    statusWhatsapp.className = 'status success';
+                    statusWhatsapp.textContent = `Ready! ${waMessages.length} messages loaded from ${fileWhatsapp.files[0].name}`;
+                    salaryTrimCard.style.display = '';
+                    showSearchCard();
+                    btnDeleteChat.style.display = '';
+                    btnUploadChat.style.display = 'none';
+                    waReady = true;
+                }
             } catch (err) {
                 statusWhatsapp.className = 'status error';
                 statusWhatsapp.textContent = 'Error: ' + err.message;
@@ -883,40 +948,68 @@
             if (!confirm('Clear the loaded chat file?')) return;
             waRawText = '';
             waMessages = [];
+            waReady = false;
             fileWhatsapp.value = '';
             nameWhatsapp.textContent = '';
             dzWhatsapp.classList.remove('has-file');
             btnDeleteChat.style.display = 'none';
             btnUploadChat.style.display = '';
             btnUploadChat.disabled = true;
-            salarySearchCard.style.display = 'none';
-            salaryTrimCard.style.display = 'none';
-            salarySearchResults.innerHTML = '';
-            salarySearchCount.textContent = '';
+            hideAllCards();
             statusWhatsapp.className = 'status success';
             statusWhatsapp.textContent = 'Chat cleared.';
         });
 
         btnSalarySearch.addEventListener('click', () => {
             const term = salarySearchTerm.value.trim();
-            if (!term || !waMessages.length) return;
+            if (!term || !waReady) return;
             btnSalarySearch.disabled = true;
             salarySearchCount.textContent = 'Searching...';
-            salarySearchResults.innerHTML = '';
+            salarySearchResults.textContent = '';
 
             const lower = term.toLowerCase();
-            const results = waMessages.filter(m => ' '.join(m.lines).toLowerCase().includes(lower));
+            const results = [];
+            for (let i = 0; i < waMessages.length; i++) {
+                if (waMessages[i].fullText.includes(lower)) results.push(waMessages[i]);
+            }
 
             salarySearchCount.textContent = `Found ${results.length} message${results.length !== 1 ? 's' : ''} matching "${term}"`;
 
-            salarySearchResults.innerHTML = results.map(r => {
-                const hdr = r.dateStr ? `<div class="search-result-header">${r.dateStr}, ${r.timeStr} - ${escHtml(r.sender)}</div>` : '';
-                const lns = r.lines.map((l, i) =>
-                    `<div><span class="search-result-line">L${r.lineNums[i]}</span><span class="search-result-text">${escHtml(l)}</span></div>`
-                ).join('');
-                return `<div class="search-result-item">${hdr}${lns}</div>`;
-            }).join('');
+            const display = results.length > MAX_DISPLAY ? results.slice(0, MAX_DISPLAY) : results;
+            const frag = document.createDocumentFragment();
 
+            for (const r of display) {
+                const item = document.createElement('div');
+                item.className = 'search-result-item';
+                if (r.dateStr) {
+                    const hdr = document.createElement('div');
+                    hdr.className = 'search-result-header';
+                    hdr.textContent = r.dateStr + ', ' + r.timeStr + ' - ' + r.sender;
+                    item.appendChild(hdr);
+                }
+                for (let i = 0; i < r.lines.length; i++) {
+                    const row = document.createElement('div');
+                    const ln = document.createElement('span');
+                    ln.className = 'search-result-line';
+                    ln.textContent = 'L' + r.lineNums[i] + ' ';
+                    const txt = document.createElement('span');
+                    txt.className = 'search-result-text';
+                    txt.textContent = r.lines[i];
+                    row.appendChild(ln);
+                    row.appendChild(txt);
+                    item.appendChild(row);
+                }
+                frag.appendChild(item);
+            }
+
+            salarySearchResults.appendChild(frag);
+
+            if (results.length > MAX_DISPLAY) {
+                const more = document.createElement('div');
+                more.style.cssText = 'color:#8b949e;font-size:12px;text-align:center;padding:12px';
+                more.textContent = `Showing ${MAX_DISPLAY} of ${results.length} results. Narrow your search to see more.`;
+                salarySearchResults.appendChild(more);
+            }
             if (results.length === 0) {
                 salarySearchResults.innerHTML = '<div style="color:#484f58;font-size:12px;text-align:center;padding:16px">No messages found</div>';
             }
@@ -928,24 +1021,23 @@
         });
 
         btnSalaryTrim.addEventListener('click', () => {
-            if (!waRawText || !waMessages.length) return;
+            if (!waRawText || !waReady) return;
             btnSalaryTrim.disabled = true;
             statusTrim.className = 'status loading';
             statusTrim.innerHTML = '<span class="spinner"></span>Trimming old messages...';
 
             const months = parseFloat(salaryTrimMonths.value);
+            const msgs = parseWAMessages(waRawText);
             const cutoff = new Date();
             cutoff.setDate(cutoff.getDate() - months * 30);
-
-            const keepIndices = new Set();
-            for (const msg of waMessages) {
+            const keep = new Set();
+            for (const msg of msgs) {
                 if (!msg.dt || msg.dt >= cutoff) {
-                    for (const ln of msg.lineNums) keepIndices.add(ln);
+                    for (const ln of msg.lineNums) keep.add(ln);
                 }
             }
-
             const allLines = waRawText.split('\n');
-            const trimmed = allLines.filter((_, i) => keepIndices.has(i + 1));
+            const trimmed = allLines.filter((_, i) => keep.has(i + 1));
             const removed = allLines.length - trimmed.length;
 
             const blob = new Blob([trimmed.join('\n')], { type: 'text/plain;charset=utf-8' });
@@ -959,7 +1051,7 @@
             URL.revokeObjectURL(url);
 
             statusTrim.className = 'status success';
-            statusTrim.textContent = `Trimmed file downloaded! Removed ${removed} old lines. Review it, then re-upload if correct.`;
+            statusTrim.textContent = `Trimmed file downloaded! Removed ${removed} lines. Review and re-upload if correct.`;
             btnSalaryTrim.disabled = false;
         });
     </script>
