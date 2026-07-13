@@ -19,7 +19,7 @@
         }
         .container {
             width: 100%;
-            max-width: 560px;
+            max-width: 600px;
         }
         .mode-toggle {
             display: flex;
@@ -28,6 +28,7 @@
             border-radius: 10px;
             padding: 4px;
             margin-bottom: 24px;
+            overflow-x: auto;
         }
         .mode-btn {
             flex: 1;
@@ -243,6 +244,30 @@
             padding: 0 4px;
             flex-shrink: 0;
         }
+        .search-result-item {
+            padding: 8px 12px;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            margin-bottom: 4px;
+            font-size: 12px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            line-height: 1.5;
+            word-break: break-word;
+        }
+        .search-result-header {
+            color: #58a6ff;
+            font-weight: 600;
+            margin-bottom: 2px;
+        }
+        .search-result-text {
+            color: #e1e4e8;
+        }
+        .search-result-line {
+            color: #484f58;
+            font-size: 10px;
+            margin-right: 6px;
+        }
     </style>
 </head>
 <body>
@@ -256,6 +281,7 @@
         <div class="mode-toggle">
             <button class="mode-btn active" data-mode="sku">SKU Labels</button>
             <button class="mode-btn" data-mode="returns">Returns Extractor</button>
+            <button class="mode-btn" data-mode="salary">Salary Extractor</button>
         </div>
 
         <div class="mode-section active" id="mode-sku">
@@ -334,6 +360,60 @@
                 <button type="submit" class="btn btn-primary" id="btn-extract" disabled>Extract &amp; Compile</button>
             </form>
             <div class="status" id="status-returns"></div>
+        </div>
+        </div>
+
+        <div class="mode-section" id="mode-salary">
+        <div class="card">
+            <div class="card-title">Salary Extractor</div>
+            <div class="card-desc">Upload WhatsApp chat export (.txt) to search and manage salary data</div>
+
+            <form id="whatsappForm">
+                <div class="dropzone" id="dz-whatsapp">
+                    <input type="file" id="file-whatsapp" accept=".txt">
+                    <div class="dropzone-icon">💬</div>
+                    <div class="dropzone-title">WhatsApp Chat File</div>
+                    <div class="dropzone-hint">TXT &bull; Export from WhatsApp &bull; Retained until replaced or deleted</div>
+                    <div class="filename" id="name-whatsapp"></div>
+                </div>
+
+                <div class="btn-row">
+                    <button type="submit" class="btn btn-primary" id="btn-upload-chat" disabled>Load Chat</button>
+                    <button type="button" class="btn btn-red" id="btn-delete-chat" style="background:#da3633;color:#fff;display:none">Delete File</button>
+                </div>
+            </form>
+            <div class="status" id="status-whatsapp"></div>
+        </div>
+
+        <div class="card" id="salary-search-card" style="display:none">
+            <div class="card-title">Search Messages</div>
+            <div class="card-desc">Type a name or keyword to find all matching lines</div>
+
+            <div style="display:flex;gap:8px;margin-bottom:12px">
+                <input type="text" id="salary-search-term" placeholder="e.g. sunil, suraj, 500 rupey..."
+                    style="flex:1;padding:8px 12px;border:1px solid #30363d;border-radius:8px;background:#0d1117;color:#e1e4e8;font-size:13px;outline:none">
+                <button type="button" class="btn btn-primary" id="btn-salary-search" disabled>Search</button>
+            </div>
+            <div id="salary-search-count" style="font-size:12px;color:#8b949e;margin-bottom:8px"></div>
+            <div id="salary-search-results" style="max-height:400px;overflow-y:auto"></div>
+        </div>
+
+        <div class="card" id="salary-trim-card" style="display:none">
+            <div class="card-title">Delete Old Messages</div>
+            <div class="card-desc">Remove messages older than a set period and download the trimmed file</div>
+
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+                <label style="font-size:12px;color:#8b949e;white-space:nowrap">Delete older than</label>
+                <select id="salary-trim-months" style="padding:6px 10px;border:1px solid #30363d;border-radius:6px;background:#0d1117;color:#e1e4e8;font-size:12px">
+                    <option value="0.5">0.5 months</option>
+                    <option value="1">1 month</option>
+                    <option value="1.5" selected>1.5 months</option>
+                    <option value="2">2 months</option>
+                    <option value="3">3 months</option>
+                </select>
+                <button type="button" class="btn btn-blue" id="btn-salary-trim">Trim &amp; Download</button>
+            </div>
+            <div class="status" id="status-trim"></div>
         </div>
         </div>
 
@@ -689,6 +769,193 @@
                 btnCrop.disabled = false;
             }
         });
+
+        // --- Salary Extractor ---
+        const fileWhatsapp = document.getElementById('file-whatsapp');
+        const nameWhatsapp = document.getElementById('name-whatsapp');
+        const dzWhatsapp = document.getElementById('dz-whatsapp');
+        const btnUploadChat = document.getElementById('btn-upload-chat');
+        const btnDeleteChat = document.getElementById('btn-delete-chat');
+        const statusWhatsapp = document.getElementById('status-whatsapp');
+        const whatsappForm = document.getElementById('whatsappForm');
+        const salarySearchCard = document.getElementById('salary-search-card');
+        const salaryTrimCard = document.getElementById('salary-trim-card');
+        const salarySearchTerm = document.getElementById('salary-search-term');
+        const btnSalarySearch = document.getElementById('btn-salary-search');
+        const salarySearchCount = document.getElementById('salary-search-count');
+        const salarySearchResults = document.getElementById('salary-search-results');
+        const btnSalaryTrim = document.getElementById('btn-salary-trim');
+        const salaryTrimMonths = document.getElementById('salary-trim-months');
+        const statusTrim = document.getElementById('status-trim');
+
+        async function checkWhatsappStatus() {
+            try {
+                const resp = await fetch('/whatsapp/status');
+                const data = await resp.json();
+                if (data.loaded) {
+                    nameWhatsapp.textContent = data.filename;
+                    dzWhatsapp.classList.add('has-file');
+                    btnUploadChat.style.display = 'none';
+                    btnDeleteChat.style.display = '';
+                    salarySearchCard.style.display = '';
+                    salaryTrimCard.style.display = '';
+                    btnSalarySearch.disabled = false;
+                } else {
+                    nameWhatsapp.textContent = '';
+                    dzWhatsapp.classList.remove('has-file');
+                    btnUploadChat.disabled = true;
+                    btnDeleteChat.style.display = 'none';
+                    salarySearchCard.style.display = 'none';
+                    salaryTrimCard.style.display = 'none';
+                }
+            } catch {}
+        }
+
+        fileWhatsapp.addEventListener('change', () => {
+            nameWhatsapp.textContent = fileWhatsapp.files[0]?.name || '';
+            dzWhatsapp.classList.toggle('has-file', !!fileWhatsapp.files[0]);
+            btnUploadChat.disabled = !fileWhatsapp.files[0];
+        });
+
+        dzWhatsapp.addEventListener('dragover', e => { e.preventDefault(); dzWhatsapp.classList.add('dragover'); });
+        dzWhatsapp.addEventListener('dragleave', () => dzWhatsapp.classList.remove('dragover'));
+        dzWhatsapp.addEventListener('drop', () => dzWhatsapp.classList.remove('dragover'));
+
+        whatsappForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!fileWhatsapp.files[0]) return;
+            btnUploadChat.disabled = true;
+            statusWhatsapp.className = 'status loading';
+            statusWhatsapp.innerHTML = '<span class="spinner"></span>Loading chat file...';
+
+            const formData = new FormData();
+            formData.append('chatfile', fileWhatsapp.files[0]);
+
+            try {
+                const resp = await fetch('/whatsapp/upload', { method: 'POST', body: formData });
+                if (!resp.ok) {
+                    let msg = 'Server error';
+                    try { const d = await resp.json(); msg = d.error || msg; } catch {}
+                    throw new Error(msg);
+                }
+                const data = await resp.json();
+                statusWhatsapp.className = 'status success';
+                statusWhatsapp.textContent = `Loaded ${data.total_messages} messages (${data.total_lines} lines)`;
+                salarySearchCard.style.display = '';
+                salaryTrimCard.style.display = '';
+                btnSalarySearch.disabled = false;
+                btnDeleteChat.style.display = '';
+                btnUploadChat.style.display = 'none';
+            } catch (err) {
+                statusWhatsapp.className = 'status error';
+                statusWhatsapp.textContent = 'Error: ' + err.message;
+            } finally {
+                btnUploadChat.disabled = false;
+            }
+        });
+
+        btnDeleteChat.addEventListener('click', async () => {
+            if (!confirm('Delete the uploaded chat file?')) return;
+            try {
+                await fetch('/whatsapp/delete', { method: 'DELETE' });
+                nameWhatsapp.textContent = '';
+                dzWhatsapp.classList.remove('has-file');
+                btnDeleteChat.style.display = 'none';
+                btnUploadChat.style.display = '';
+                btnUploadChat.disabled = true;
+                salarySearchCard.style.display = 'none';
+                salaryTrimCard.style.display = 'none';
+                salarySearchResults.innerHTML = '';
+                salarySearchCount.textContent = '';
+                statusWhatsapp.className = 'status success';
+                statusWhatsapp.textContent = 'File deleted.';
+            } catch (err) {
+                statusWhatsapp.className = 'status error';
+                statusWhatsapp.textContent = 'Error: ' + err.message;
+            }
+        });
+
+        btnSalarySearch.addEventListener('click', async () => {
+            const term = salarySearchTerm.value.trim();
+            if (!term) return;
+            btnSalarySearch.disabled = true;
+            salarySearchCount.textContent = 'Searching...';
+            salarySearchResults.innerHTML = '';
+
+            try {
+                const resp = await fetch('/whatsapp/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ term }),
+                });
+                if (!resp.ok) {
+                    let msg = 'Server error';
+                    try { const d = await resp.json(); msg = d.error || msg; } catch {}
+                    throw new Error(msg);
+                }
+                const data = await resp.json();
+                salarySearchCount.textContent = `Found ${data.count} message${data.count !== 1 ? 's' : ''} matching "${data.term}"`;
+
+                salarySearchResults.innerHTML = data.results.map(r => {
+                    const headerHtml = r.header ? `<div class="search-result-header">${r.header}</div>` : '';
+                    const linesHtml = r.lines.map((l, i) => {
+                        const ln = r.line_numbers[i];
+                        return `<div><span class="search-result-line">L${ln}</span><span class="search-result-text">${l.replace(/</g, '&lt;')}</span></div>`;
+                    }).join('');
+                    return `<div class="search-result-item">${headerHtml}${linesHtml}</div>`;
+                }).join('');
+
+                if (data.count === 0) {
+                    salarySearchResults.innerHTML = '<div style="color:#484f58;font-size:12px;text-align:center;padding:16px">No messages found</div>';
+                }
+            } catch (err) {
+                salarySearchCount.textContent = 'Error: ' + err.message;
+            } finally {
+                btnSalarySearch.disabled = false;
+            }
+        });
+
+        salarySearchTerm.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); btnSalarySearch.click(); }
+        });
+
+        btnSalaryTrim.addEventListener('click', async () => {
+            btnSalaryTrim.disabled = true;
+            statusTrim.className = 'status loading';
+            statusTrim.innerHTML = '<span class="spinner"></span>Trimming old messages...';
+
+            try {
+                const resp = await fetch('/whatsapp/trim', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ months: parseFloat(salaryTrimMonths.value) }),
+                });
+                if (!resp.ok) {
+                    let msg = 'Server error';
+                    try { const d = await resp.json(); msg = d.error || msg; } catch {}
+                    throw new Error(msg);
+                }
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'chat_trimmed.txt';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+
+                statusTrim.className = 'status success';
+                statusTrim.textContent = 'Trimmed file downloaded! Review it, then re-upload if correct.';
+            } catch (err) {
+                statusTrim.className = 'status error';
+                statusTrim.textContent = 'Error: ' + err.message;
+            } finally {
+                btnSalaryTrim.disabled = false;
+            }
+        });
+
+        checkWhatsappStatus();
     </script>
 </body>
 </html>
