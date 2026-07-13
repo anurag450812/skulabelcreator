@@ -770,7 +770,7 @@
             }
         });
 
-        // --- Salary Extractor ---
+        // --- Salary Extractor (client-side) ---
         const fileWhatsapp = document.getElementById('file-whatsapp');
         const nameWhatsapp = document.getElementById('name-whatsapp');
         const dzWhatsapp = document.getElementById('dz-whatsapp');
@@ -788,28 +788,61 @@
         const salaryTrimMonths = document.getElementById('salary-trim-months');
         const statusTrim = document.getElementById('status-trim');
 
-        async function checkWhatsappStatus() {
-            try {
-                const resp = await fetch('/whatsapp/status');
-                const data = await resp.json();
-                if (data.loaded) {
-                    nameWhatsapp.textContent = data.filename;
-                    dzWhatsapp.classList.add('has-file');
-                    btnUploadChat.style.display = 'none';
-                    btnDeleteChat.style.display = '';
-                    salarySearchCard.style.display = '';
-                    salaryTrimCard.style.display = '';
-                    btnSalarySearch.disabled = false;
-                } else {
-                    nameWhatsapp.textContent = '';
-                    dzWhatsapp.classList.remove('has-file');
-                    btnUploadChat.disabled = true;
-                    btnDeleteChat.style.display = 'none';
-                    salarySearchCard.style.display = 'none';
-                    salaryTrimCard.style.display = 'none';
-                }
-            } catch {}
+        let waRawText = '';
+        let waMessages = [];
+
+        const WA_DATE_RE = /^(\d{1,2}\/\d{1,2}\/\d{2,4}),\s+(\d{1,2}:\d{2}\s+[ap]m)\s+-\s+/;
+
+        function parseWADate(d, t) {
+            for (const fmt of ['%d/%m/%y, %I:%M %p', '%d/%m/%Y, %I:%M %p']) {
+                const parts = d.split('/');
+                if (parts.length !== 3) continue;
+                let [dd, mm, yy] = parts;
+                if (yy.length === 2) yy = '20' + yy;
+                const h = parseInt(t.split(':')[0]);
+                const mi = t.split(':')[1].split(' ')[0];
+                const ap = t.toLowerCase().includes('pm') ? 'PM' : 'AM';
+                let hh = h;
+                if (ap === 'PM' && h !== 12) hh += 12;
+                if (ap === 'AM' && h === 12) hh = 0;
+                const dt = new Date(parseInt(yy), parseInt(mm) - 1, parseInt(dd), hh, parseInt(mi));
+                if (!isNaN(dt.getTime())) return dt;
+            }
+            return null;
         }
+
+        function parseWAMessages(text) {
+            const lines = text.split('\n');
+            const messages = [];
+            let cur = null;
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                const m = line.match(WA_DATE_RE);
+                if (m) {
+                    if (cur) messages.push(cur);
+                    const rest = line.substring(m[0].length);
+                    const ci = rest.indexOf(': ');
+                    const sender = ci !== -1 ? rest.substring(0, ci) : '';
+                    const body = ci !== -1 ? rest.substring(ci + 2) : rest;
+                    cur = {
+                        dateStr: m[1], timeStr: m[2],
+                        dt: parseWADate(m[1], m[2]),
+                        sender, lines: [body], lineNums: [i + 1]
+                    };
+                } else {
+                    if (cur) {
+                        cur.lines.push(line);
+                        cur.lineNums.push(i + 1);
+                    } else {
+                        cur = { dateStr: '', timeStr: '', dt: null, sender: '', lines: [line], lineNums: [i + 1] };
+                    }
+                }
+            }
+            if (cur) messages.push(cur);
+            return messages;
+        }
+
+        function escHtml(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
         fileWhatsapp.addEventListener('change', () => {
             nameWhatsapp.textContent = fileWhatsapp.files[0]?.name || '';
@@ -826,21 +859,13 @@
             if (!fileWhatsapp.files[0]) return;
             btnUploadChat.disabled = true;
             statusWhatsapp.className = 'status loading';
-            statusWhatsapp.innerHTML = '<span class="spinner"></span>Loading chat file...';
-
-            const formData = new FormData();
-            formData.append('chatfile', fileWhatsapp.files[0]);
+            statusWhatsapp.innerHTML = '<span class="spinner"></span>Parsing chat file...';
 
             try {
-                const resp = await fetch('/whatsapp/upload', { method: 'POST', body: formData });
-                if (!resp.ok) {
-                    let msg = 'Server error';
-                    try { const d = await resp.json(); msg = d.error || msg; } catch {}
-                    throw new Error(msg);
-                }
-                const data = await resp.json();
+                waRawText = await fileWhatsapp.files[0].text();
+                waMessages = parseWAMessages(waRawText);
                 statusWhatsapp.className = 'status success';
-                statusWhatsapp.textContent = `Loaded ${data.total_messages} messages (${data.total_lines} lines)`;
+                statusWhatsapp.textContent = `Loaded ${waMessages.length} messages from ${fileWhatsapp.files[0].name}`;
                 salarySearchCard.style.display = '';
                 salaryTrimCard.style.display = '';
                 btnSalarySearch.disabled = false;
@@ -854,108 +879,89 @@
             }
         });
 
-        btnDeleteChat.addEventListener('click', async () => {
-            if (!confirm('Delete the uploaded chat file?')) return;
-            try {
-                await fetch('/whatsapp/delete', { method: 'DELETE' });
-                nameWhatsapp.textContent = '';
-                dzWhatsapp.classList.remove('has-file');
-                btnDeleteChat.style.display = 'none';
-                btnUploadChat.style.display = '';
-                btnUploadChat.disabled = true;
-                salarySearchCard.style.display = 'none';
-                salaryTrimCard.style.display = 'none';
-                salarySearchResults.innerHTML = '';
-                salarySearchCount.textContent = '';
-                statusWhatsapp.className = 'status success';
-                statusWhatsapp.textContent = 'File deleted.';
-            } catch (err) {
-                statusWhatsapp.className = 'status error';
-                statusWhatsapp.textContent = 'Error: ' + err.message;
-            }
+        btnDeleteChat.addEventListener('click', () => {
+            if (!confirm('Clear the loaded chat file?')) return;
+            waRawText = '';
+            waMessages = [];
+            fileWhatsapp.value = '';
+            nameWhatsapp.textContent = '';
+            dzWhatsapp.classList.remove('has-file');
+            btnDeleteChat.style.display = 'none';
+            btnUploadChat.style.display = '';
+            btnUploadChat.disabled = true;
+            salarySearchCard.style.display = 'none';
+            salaryTrimCard.style.display = 'none';
+            salarySearchResults.innerHTML = '';
+            salarySearchCount.textContent = '';
+            statusWhatsapp.className = 'status success';
+            statusWhatsapp.textContent = 'Chat cleared.';
         });
 
-        btnSalarySearch.addEventListener('click', async () => {
+        btnSalarySearch.addEventListener('click', () => {
             const term = salarySearchTerm.value.trim();
-            if (!term) return;
+            if (!term || !waMessages.length) return;
             btnSalarySearch.disabled = true;
             salarySearchCount.textContent = 'Searching...';
             salarySearchResults.innerHTML = '';
 
-            try {
-                const resp = await fetch('/whatsapp/search', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ term }),
-                });
-                if (!resp.ok) {
-                    let msg = 'Server error';
-                    try { const d = await resp.json(); msg = d.error || msg; } catch {}
-                    throw new Error(msg);
-                }
-                const data = await resp.json();
-                salarySearchCount.textContent = `Found ${data.count} message${data.count !== 1 ? 's' : ''} matching "${data.term}"`;
+            const lower = term.toLowerCase();
+            const results = waMessages.filter(m => ' '.join(m.lines).toLowerCase().includes(lower));
 
-                salarySearchResults.innerHTML = data.results.map(r => {
-                    const headerHtml = r.header ? `<div class="search-result-header">${r.header}</div>` : '';
-                    const linesHtml = r.lines.map((l, i) => {
-                        const ln = r.line_numbers[i];
-                        return `<div><span class="search-result-line">L${ln}</span><span class="search-result-text">${l.replace(/</g, '&lt;')}</span></div>`;
-                    }).join('');
-                    return `<div class="search-result-item">${headerHtml}${linesHtml}</div>`;
-                }).join('');
+            salarySearchCount.textContent = `Found ${results.length} message${results.length !== 1 ? 's' : ''} matching "${term}"`;
 
-                if (data.count === 0) {
-                    salarySearchResults.innerHTML = '<div style="color:#484f58;font-size:12px;text-align:center;padding:16px">No messages found</div>';
-                }
-            } catch (err) {
-                salarySearchCount.textContent = 'Error: ' + err.message;
-            } finally {
-                btnSalarySearch.disabled = false;
+            salarySearchResults.innerHTML = results.map(r => {
+                const hdr = r.dateStr ? `<div class="search-result-header">${r.dateStr}, ${r.timeStr} - ${escHtml(r.sender)}</div>` : '';
+                const lns = r.lines.map((l, i) =>
+                    `<div><span class="search-result-line">L${r.lineNums[i]}</span><span class="search-result-text">${escHtml(l)}</span></div>`
+                ).join('');
+                return `<div class="search-result-item">${hdr}${lns}</div>`;
+            }).join('');
+
+            if (results.length === 0) {
+                salarySearchResults.innerHTML = '<div style="color:#484f58;font-size:12px;text-align:center;padding:16px">No messages found</div>';
             }
+            btnSalarySearch.disabled = false;
         });
 
         salarySearchTerm.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') { e.preventDefault(); btnSalarySearch.click(); }
         });
 
-        btnSalaryTrim.addEventListener('click', async () => {
+        btnSalaryTrim.addEventListener('click', () => {
+            if (!waRawText || !waMessages.length) return;
             btnSalaryTrim.disabled = true;
             statusTrim.className = 'status loading';
             statusTrim.innerHTML = '<span class="spinner"></span>Trimming old messages...';
 
-            try {
-                const resp = await fetch('/whatsapp/trim', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ months: parseFloat(salaryTrimMonths.value) }),
-                });
-                if (!resp.ok) {
-                    let msg = 'Server error';
-                    try { const d = await resp.json(); msg = d.error || msg; } catch {}
-                    throw new Error(msg);
+            const months = parseFloat(salaryTrimMonths.value);
+            const cutoff = new Date();
+            cutoff.setDate(cutoff.getDate() - months * 30);
+
+            const keepIndices = new Set();
+            for (const msg of waMessages) {
+                if (!msg.dt || msg.dt >= cutoff) {
+                    for (const ln of msg.lineNums) keepIndices.add(ln);
                 }
-                const blob = await resp.blob();
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = 'chat_trimmed.txt';
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-                URL.revokeObjectURL(url);
-
-                statusTrim.className = 'status success';
-                statusTrim.textContent = 'Trimmed file downloaded! Review it, then re-upload if correct.';
-            } catch (err) {
-                statusTrim.className = 'status error';
-                statusTrim.textContent = 'Error: ' + err.message;
-            } finally {
-                btnSalaryTrim.disabled = false;
             }
-        });
 
-        checkWhatsappStatus();
+            const allLines = waRawText.split('\n');
+            const trimmed = allLines.filter((_, i) => keepIndices.has(i + 1));
+            const removed = allLines.length - trimmed.length;
+
+            const blob = new Blob([trimmed.join('\n')], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'chat_trimmed.txt';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+
+            statusTrim.className = 'status success';
+            statusTrim.textContent = `Trimmed file downloaded! Removed ${removed} old lines. Review it, then re-upload if correct.`;
+            btnSalaryTrim.disabled = false;
+        });
     </script>
 </body>
 </html>
