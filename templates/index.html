@@ -277,6 +277,10 @@
             color: #fff;
             border-color: #238636;
         }
+        .search-result-item.selected {
+            border-color: #58a6ff;
+            background: rgba(56,139,253,0.1);
+        }
     </style>
 </head>
 <body>
@@ -792,6 +796,7 @@
         let waReady = false;
         let lastMatches = [];
         let currentSort = 'original';
+        let selectedIdx = -1;
         const MAX_DISPLAY = 200;
 
         const WA_DATE_RE = /^(\d{1,2}\/\d{1,2}\/\d{2,4}),\s+(\d{1,2}:\d{2}\s+[ap]m)\s+-\s+/;
@@ -932,26 +937,61 @@
             return arr;
         }
 
+        let sortedCache = [];
+
         function renderResults() {
             salarySearchResults.textContent = '';
-            if (!lastMatches.length) return;
-            const sorted = getSortedMatches(lastMatches, currentSort);
-            const display = sorted.length > MAX_DISPLAY ? sorted.slice(0, MAX_DISPLAY) : sorted;
+            if (!lastMatches.length) { sortedCache = []; return; }
+            sortedCache = getSortedMatches(lastMatches, currentSort);
+            const display = sortedCache.length > MAX_DISPLAY ? sortedCache.slice(0, MAX_DISPLAY) : sortedCache;
             const frag = document.createDocumentFragment();
-            for (const line of display) {
+            for (let i = 0; i < display.length; i++) {
                 const div = document.createElement('div');
-                div.className = 'search-result-item';
-                div.textContent = line;
+                div.className = 'search-result-item' + (i === selectedIdx ? ' selected' : '');
+                div.textContent = display[i];
+                div.dataset.idx = i;
+                div.addEventListener('click', () => {
+                    selectedIdx = (selectedIdx === i) ? -1 : i;
+                    renderResults();
+                });
                 frag.appendChild(div);
             }
             salarySearchResults.appendChild(frag);
-            if (sorted.length > MAX_DISPLAY) {
+            if (sortedCache.length > MAX_DISPLAY) {
                 const more = document.createElement('div');
                 more.style.cssText = 'color:#8b949e;font-size:12px;text-align:center;padding:12px';
-                more.textContent = `Showing ${MAX_DISPLAY} of ${sorted.length} lines. Narrow your search to see more.`;
+                more.textContent = `Showing ${MAX_DISPLAY} of ${sortedCache.length} lines. Narrow your search to see more.`;
                 salarySearchResults.appendChild(more);
             }
+            if (selectedIdx >= 0) {
+                const sel = salarySearchResults.querySelector('.selected');
+                if (sel) sel.scrollIntoView({ block: 'nearest' });
+            }
         }
+
+        document.addEventListener('keydown', (e) => {
+            if (!waReady || !sortedCache.length || salarySearchCard.style.display === 'none') return;
+            if (document.activeElement === salarySearchTerm) return;
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (selectedIdx < sortedCache.length - 1) {
+                    selectedIdx++;
+                    renderResults();
+                }
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (selectedIdx > 0) {
+                    selectedIdx--;
+                    renderResults();
+                } else if (selectedIdx === -1 && sortedCache.length > 0) {
+                    selectedIdx = 0;
+                    renderResults();
+                }
+            } else if (e.key === 'Escape') {
+                selectedIdx = -1;
+                renderResults();
+            }
+        });
 
         sortBtns.forEach(btn => {
             btn.addEventListener('click', () => {
