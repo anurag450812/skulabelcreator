@@ -816,7 +816,7 @@
         async function saveChat(text, filename) {
             const db = await openWADb();
             const tx = db.transaction(WA_STORE, 'readwrite');
-            tx.objectStore(WA_STORE).put({ text, filename, ts: Date.now() });
+            tx.objectStore(WA_STORE).put({ text, filename, ts: Date.now() }, 1);
             return new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = rej; });
         }
 
