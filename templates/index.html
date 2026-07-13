@@ -793,11 +793,49 @@
         const sortBtns = salarySortBar.querySelectorAll('.sort-btn');
 
         let waRawText = '';
+        let waFileName = '';
         let waReady = false;
         let lastMatches = [];
         let currentSort = 'original';
         let selectedIdx = -1;
         const MAX_DISPLAY = 200;
+
+        // --- IndexedDB persistence ---
+        const WA_DB = 'SalaryExtractorDB';
+        const WA_STORE = 'chat';
+
+        function openWADb() {
+            return new Promise((resolve, reject) => {
+                const req = indexedDB.open(WA_DB, 1);
+                req.onupgradeneeded = () => req.result.createObjectStore(WA_STORE);
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        async function saveChat(text, filename) {
+            const db = await openWADb();
+            const tx = db.transaction(WA_STORE, 'readwrite');
+            tx.objectStore(WA_STORE).put({ text, filename, ts: Date.now() });
+            return new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = rej; });
+        }
+
+        async function loadChat() {
+            const db = await openWADb();
+            const tx = db.transaction(WA_STORE, 'readonly');
+            const req = tx.objectStore(WA_STORE).get(1);
+            return new Promise((res, rej) => {
+                req.onsuccess = () => res(req.result || null);
+                req.onerror = () => rej(req.error);
+            });
+        }
+
+        async function deleteChatDb() {
+            const db = await openWADb();
+            const tx = db.transaction(WA_STORE, 'readwrite');
+            tx.objectStore(WA_STORE).clear();
+            return new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = rej; });
+        }
 
         const WA_DATE_RE = /^(\d{1,2}\/\d{1,2}\/\d{2,4}),\s+(\d{1,2}:\d{2}\s+[ap]m)\s+-\s+/;
 
@@ -865,6 +903,17 @@
             lastMatches = [];
         }
 
+        function activateSearch(name) {
+            salarySearchCard.style.display = '';
+            btnSalarySearch.disabled = false;
+            salarySearchCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            btnDeleteChat.style.display = '';
+            btnUploadChat.style.display = 'none';
+            waReady = true;
+            statusWhatsapp.className = 'status success';
+            statusWhatsapp.textContent = `Ready! ${waRawText.split('\n').length} lines loaded from ${name}`;
+        }
+
         fileWhatsapp.addEventListener('change', () => {
             nameWhatsapp.textContent = fileWhatsapp.files[0]?.name || '';
             dzWhatsapp.classList.toggle('has-file', !!fileWhatsapp.files[0]);
@@ -884,6 +933,7 @@
 
             try {
                 waRawText = await fileWhatsapp.files[0].text();
+                waFileName = fileWhatsapp.files[0].name;
 
                 if (hasOldData(waRawText)) {
                     const removed = trimAndDownload(waRawText, 1.5);
@@ -894,14 +944,8 @@
                     btnUploadChat.style.display = 'none';
                     waReady = false;
                 } else {
-                    statusWhatsapp.className = 'status success';
-                    statusWhatsapp.textContent = `Ready! ${waRawText.split('\\n').length} lines loaded from ${fileWhatsapp.files[0].name}`;
-                    salarySearchCard.style.display = '';
-                    btnSalarySearch.disabled = false;
-                    salarySearchCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                    btnDeleteChat.style.display = '';
-                    btnUploadChat.style.display = 'none';
-                    waReady = true;
+                    await saveChat(waRawText, waFileName);
+                    activateSearch(waFileName);
                 }
             } catch (err) {
                 statusWhatsapp.className = 'status error';
@@ -911,11 +955,13 @@
             }
         });
 
-        btnDeleteChat.addEventListener('click', () => {
+        btnDeleteChat.addEventListener('click', async () => {
             if (!confirm('Clear the loaded chat file?')) return;
             waRawText = '';
+            waFileName = '';
             waReady = false;
             lastMatches = [];
+            await deleteChatDb();
             fileWhatsapp.value = '';
             nameWhatsapp.textContent = '';
             dzWhatsapp.classList.remove('has-file');
@@ -1058,6 +1104,30 @@
                 setTimeout(() => btnCopyResults.textContent = orig, 1500);
             }
         });
+
+        // --- Restore from IndexedDB on page load ---
+        (async () => {
+            try {
+                const stored = await loadChat();
+                if (stored && stored.text) {
+                    waRawText = stored.text;
+                    waFileName = stored.filename || 'chat.txt';
+                    if (!hasOldData(waRawText)) {
+                        nameWhatsapp.textContent = waFileName;
+                        dzWhatsapp.classList.add('has-file');
+                        activateSearch(waFileName);
+                    } else {
+                        const removed = trimAndDownload(waRawText, 1.5);
+                        waRawText = '';
+                        await deleteChatDb();
+                        statusWhatsapp.className = 'status error';
+                        statusWhatsapp.innerHTML = `Previous file had old data. Trimmed version downloaded (${removed} lines removed).<br><b>Re-upload the trimmed file.</b>`;
+                        btnDeleteChat.style.display = '';
+                        btnUploadChat.style.display = 'none';
+                    }
+                }
+            } catch {}
+        })();
     </script>
 </body>
 </html>
