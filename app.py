@@ -69,7 +69,7 @@ def get_last_month_str():
     today = datetime.now()
     first_of_this_month = today.replace(day=1)
     last_month = first_of_this_month - timedelta(days=1)
-    return f"{last_month.day}-{month_abbr[last_month.month]}"
+    return f"{month_abbr[last_month.month]} {last_month.year}"
 
 def compute_dynamic_defaults(row, col):
     sku_id = str(row.get('SKU Id', '')).strip().lower() if pd.notna(row.get('SKU Id', '')) else ''
