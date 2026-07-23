@@ -13,7 +13,8 @@ import traceback
 import io
 import csv
 from datetime import datetime, timedelta
-from calendar import month_name
+from calendar import month_name, month_abbr
+import re
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max
@@ -64,6 +65,24 @@ FLIPKART_FILTERS = {
     'Return Type': 'customer_return',
     'Return Reason': 'MISSHIPMENT',
 }
+
+MONTH_ABBR_MAP = {name.lower(): i for i, name in enumerate(month_name) if i}
+MONTH_ABBR_MAP.update({name.lower(): i for i, name in enumerate(month_abbr) if i})
+
+def normalize_mfg_date(raw):
+    raw = str(raw).strip()
+    m = re.search(r'([A-Za-z]+)[\s\-/]*([0-9]{2,4})', raw)
+    if not m:
+        return raw
+    month_str, year_str = m.group(1), m.group(2)
+    month_num = MONTH_ABBR_MAP.get(month_str.lower())
+    if not month_num:
+        return raw
+    full_month = month_name[month_num]
+    year = int(year_str)
+    if year < 100:
+        year += 2000
+    return f"{full_month} {year}"
 
 def get_last_month_str():
     today = datetime.now()
@@ -234,7 +253,7 @@ def generate_labels(csv_path, fsn_pdf_path):
             c.drawString(margin_left, current_y, f"Generic Name- {row['Generic Name']}")
             current_y -= 0.35 * inch
 
-            mfg_text = f"Month & Year of Manufacturing- {row['Month & Year of Manufacturing']}"
+            mfg_text = f"Month & Year of Manufacturing- {normalize_mfg_date(row['Month & Year of Manufacturing'])}"
             mfg_font_size = 14
             available_width = label_width - 2 * margin_left
             while mfg_font_size > 8 and c.stringWidth(mfg_text, "Helvetica", mfg_font_size) > available_width:

@@ -4,6 +4,26 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.units import mm, inch
 import os
 import glob
+import re
+from calendar import month_name, month_abbr
+
+MONTH_ABBR_MAP = {name.lower(): i for i, name in enumerate(month_name) if i}
+MONTH_ABBR_MAP.update({name.lower(): i for i, name in enumerate(month_abbr) if i})
+
+def normalize_mfg_date(raw):
+    raw = str(raw).strip()
+    m = re.search(r'([A-Za-z]+)[\s\-/]*([0-9]{2,4})', raw)
+    if not m:
+        return raw
+    month_str, year_str = m.group(1), m.group(2)
+    month_num = MONTH_ABBR_MAP.get(month_str.lower())
+    if not month_num:
+        return raw
+    full_month = month_name[month_num]
+    year = int(year_str)
+    if year < 100:
+        year += 2000
+    return f"{full_month} {year}"
 
 def take_barcode_screenshots(fsn_pdf, fsn_sku_map, output_dir=r"D:\sku labels\temp_barcodes"):
     if not os.path.exists(output_dir):
@@ -194,7 +214,7 @@ def generate_labels():
             current_y -= 0.35 * inch
             
             # --- Manufacturing Date ---
-            mfg_date_text = f"Month & Year of Manufacturing- {row['Month & Year of Manufacturing']}"
+            mfg_date_text = f"Month & Year of Manufacturing- {normalize_mfg_date(row['Month & Year of Manufacturing'])}"
             mfg_font_size = 14
             available_width = label_width - 2 * margin_left
             while mfg_font_size > 8 and c.stringWidth(mfg_date_text, "Helvetica", mfg_font_size) > available_width:
