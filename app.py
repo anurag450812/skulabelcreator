@@ -26,6 +26,13 @@ REQUIRED_COLUMNS = [
     'EAN/FSN/LID Barcode', 'Dimensions (cm)', 'Size'
 ]
 
+UNNECESSARY_COLUMNS = [
+    'Style Code', 'Color', 'Isbn', 'Model Id',
+    'Quantity Received', 'Inwarded to Store', 'QC Fail', 'QC In Progress',
+    'QC Passed', 'Cost Price', 'Length(In cms)', 'Breadth(In cms)',
+    'Height(In cms)', 'Weight(In kgs)',
+]
+
 STATIC_DEFAULTS = {
     'Net Quantity': '1 unit',
     'Customer Care Details': 'email us at- xidlzzzzzz@gmail.com',
@@ -399,6 +406,7 @@ def generate():
     try:
         df = pd.read_csv(csv_path)
         df.columns = df.columns.str.strip()
+        df.drop(columns=[c for c in UNNECESSARY_COLUMNS if c in df.columns], inplace=True)
 
         if 'Brand' not in df.columns:
             return jsonify({'error': 'Brand column is missing from the consignment file'}), 400
@@ -435,6 +443,8 @@ def check_columns():
     try:
         consignment.save(csv_path)
         df = pd.read_csv(csv_path)
+        df.columns = df.columns.str.strip()
+        df.drop(columns=[c for c in UNNECESSARY_COLUMNS if c in df.columns], inplace=True)
 
         # --- Fill MRP from QC folder if present ---
         qc_files = request.files.getlist('qc')
