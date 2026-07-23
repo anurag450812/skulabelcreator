@@ -319,11 +319,19 @@
                     <div class="filename" id="name-fsn"></div>
                 </div>
 
+                <div class="dropzone" id="dz-labels">
+                    <input type="file" id="file-labels" accept=".csv">
+                    <div class="dropzone-icon">📋</div>
+                    <div class="dropzone-title">Labels CSV <span style="color:#8b949e;font-weight:400">(Optional)</span></div>
+                    <div class="dropzone-hint">labels.csv defining which fields each category needs</div>
+                    <div class="filename" id="name-labels"></div>
+                </div>
+
                 <div class="dropzone" id="dz-qc">
-                    <input type="file" id="file-qc" webkitdirectory>
+                    <input type="file" id="file-qc" accept=".csv" multiple>
                     <div class="dropzone-icon">📁</div>
-                    <div class="dropzone-title">QC Folder <span style="color:#8b949e;font-weight:400">(Optional)</span></div>
-                    <div class="dropzone-hint">labels.csv + Quality_Check*.csv for auto-filling columns</div>
+                    <div class="dropzone-title">QC Files <span style="color:#8b949e;font-weight:400">(Optional)</span></div>
+                    <div class="dropzone-hint">Quality_Check*.csv files for auto-filling columns</div>
                     <div class="filename" id="name-qc"></div>
                 </div>
 
@@ -554,12 +562,15 @@
         // --- SKU Label Generator (existing) ---
         const fileConsignment = document.getElementById('file-consignment');
         const fileFsn = document.getElementById('file-fsn');
+        const fileLabels = document.getElementById('file-labels');
         const fileQc = document.getElementById('file-qc');
         const nameConsignment = document.getElementById('name-consignment');
         const nameFsn = document.getElementById('name-fsn');
+        const nameLabels = document.getElementById('name-labels');
         const nameQc = document.getElementById('name-qc');
         const dzConsignment = document.getElementById('dz-consignment');
         const dzFsn = document.getElementById('dz-fsn');
+        const dzLabels = document.getElementById('dz-labels');
         const dzQc = document.getElementById('dz-qc');
         const btnGenerate = document.getElementById('btn-generate');
         const btnBoxes = document.getElementById('btn-boxes');
@@ -569,19 +580,22 @@
         function updateUI() {
             nameConsignment.textContent = fileConsignment.files[0]?.name || '';
             nameFsn.textContent = fileFsn.files[0]?.name || '';
-            nameQc.textContent = fileQc.files[0]?.name || '';
+            nameLabels.textContent = fileLabels.files[0]?.name || '';
+            nameQc.textContent = fileQc.files.length > 0 ? Array.from(fileQc.files).map(f => f.name).join(', ') : '';
             dzConsignment.classList.toggle('has-file', !!fileConsignment.files[0]);
             dzFsn.classList.toggle('has-file', !!fileFsn.files[0]);
-            dzQc.classList.toggle('has-file', !!fileQc.files[0]);
+            dzLabels.classList.toggle('has-file', !!fileLabels.files[0]);
+            dzQc.classList.toggle('has-file', fileQc.files.length > 0);
             btnGenerate.disabled = !(fileConsignment.files[0] && fileFsn.files[0]);
             btnBoxes.disabled = !fileConsignment.files[0];
         }
 
         fileConsignment.addEventListener('change', updateUI);
         fileFsn.addEventListener('change', updateUI);
+        fileLabels.addEventListener('change', updateUI);
         fileQc.addEventListener('change', updateUI);
 
-        ['dz-consignment', 'dz-fsn', 'dz-qc'].forEach(id => {
+        ['dz-consignment', 'dz-fsn', 'dz-labels', 'dz-qc'].forEach(id => {
             const dz = document.getElementById(id);
             dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
             dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
@@ -599,6 +613,9 @@
             formData.append('consignment', fileConsignment.files[0]);
             formData.append('fsn', fileFsn.files[0]);
 
+            if (fileLabels.files.length > 0) {
+                formData.append('labels', fileLabels.files[0]);
+            }
             if (fileQc.files.length > 0) {
                 for (let i = 0; i < fileQc.files.length; i++) {
                     formData.append('qc', fileQc.files[i]);

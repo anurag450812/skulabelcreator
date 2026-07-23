@@ -238,33 +238,35 @@ def compute_dynamic_defaults(row, col):
 
     return STATIC_DEFAULTS.get(col, '')
 
-def fill_qc_and_defaults(df, qc_files, tmp_dir):
+def fill_qc_and_defaults(df, labels_file, qc_files, tmp_dir):
     label_categories = {}
     sku_data = {}
     generic_names = {}
-    print(f"[QC] fill_qc_and_defaults called. qc_files count: {len(qc_files) if qc_files else 0}")
+    print(f"[QC] fill_qc_and_defaults called. labels_file: {labels_file.filename if labels_file else None}, qc_files count: {len(qc_files) if qc_files else 0}")
+
+    if labels_file and labels_file.filename:
+        labels_path = os.path.join(tmp_dir, 'labels.csv')
+        try:
+            labels_file.save(labels_path)
+            label_categories = parse_labels_csv(labels_path)
+            print(f"[QC] labels.csv parsed: {label_categories}")
+        except Exception as e:
+            print(f"[QC] labels.csv error: {e}")
+
     if qc_files:
-        saved_files = []
         for qc_file in qc_files:
             fname = qc_file.filename or ''
             base_lower = os.path.basename(fname).lower()
-            print(f"[QC] Found file: {fname} -> base_lower={base_lower}")
+            print(f"[QC] Found QC file: {fname} -> base_lower={base_lower}")
             dest = os.path.join(tmp_dir, 'qc_' + base_lower.replace('/', '_').replace('\\', '_'))
             try:
                 qc_file.save(dest)
-                saved_files.append((dest, base_lower))
                 print(f"[QC] Saved to {dest}")
             except Exception as e:
                 print(f"[QC] Failed to save {fname}: {e}")
 
-        for dest, base_lower in saved_files:
-            if base_lower == 'labels.csv':
-                try:
-                    label_categories = parse_labels_csv(dest)
-                    print(f"[QC] labels.csv parsed: {label_categories}")
-                except Exception as e:
-                    print(f"[QC] labels.csv parse error: {e}")
-
+    saved_files = [(os.path.join(tmp_dir, f), f) for f in os.listdir(tmp_dir) if f.startswith('qc_')]
+    if saved_files:
         sku_data, generic_names = read_qc_files_from_disk(saved_files, tmp_dir)
         print(f"[QC] sku_data keys: {list(sku_data.keys())[:10]}")
         print(f"[QC] generic_names sample: {dict(list(generic_names.items())[:5])}")
@@ -642,7 +644,8 @@ def generate():
         df.drop(columns=[c for c in UNNECESSARY_COLUMNS if c in df.columns], inplace=True)
 
         qc_files = request.files.getlist('qc')
-        fill_qc_and_defaults(df, qc_files, tmp_dir)
+        labels_file = request.files.get('labels')
+        fill_qc_and_defaults(df, labels_file, qc_files, tmp_dir)
         df.to_csv(csv_path, index=False)
 
         if 'Brand' not in df.columns:
@@ -695,7 +698,8 @@ def check_columns():
 
         # --- Read QC folder and fill data ---
         qc_files = request.files.getlist('qc')
-        missing = fill_qc_and_defaults(df, qc_files, tmp_dir)
+        labels_file = request.files.get('labels')
+        missing = fill_qc_and_defaults(df, labels_file, qc_files, tmp_dir)
 
         # --- Check if all required data is present ---
         if not missing and 'Brand' in df.columns:
