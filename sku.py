@@ -195,7 +195,13 @@ def generate_labels():
             
             # --- Manufacturing Date ---
             mfg_date_text = f"Month & Year of Manufacturing- {row['Month & Year of Manufacturing']}"
+            mfg_font_size = 14
+            available_width = label_width - 2 * margin_left
+            while mfg_font_size > 8 and c.stringWidth(mfg_date_text, "Helvetica", mfg_font_size) > available_width:
+                mfg_font_size -= 1
+            c.setFont("Helvetica", mfg_font_size)
             c.drawString(margin_left, current_y, mfg_date_text)
+            c.setFont("Helvetica", 14)
             current_y -= 0.35 * inch
             
             # --- Manufactured by (2 lines) ---

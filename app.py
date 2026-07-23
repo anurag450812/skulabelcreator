@@ -13,7 +13,7 @@ import traceback
 import io
 import csv
 from datetime import datetime, timedelta
-from calendar import month_abbr
+from calendar import month_name
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max
@@ -69,7 +69,7 @@ def get_last_month_str():
     today = datetime.now()
     first_of_this_month = today.replace(day=1)
     last_month = first_of_this_month - timedelta(days=1)
-    return f"{month_abbr[last_month.month]} {last_month.year}"
+    return f"{month_name[last_month.month]} {last_month.year}"
 
 def compute_dynamic_defaults(row, col):
     sku_id = str(row.get('SKU Id', '')).strip().lower() if pd.notna(row.get('SKU Id', '')) else ''
@@ -234,7 +234,14 @@ def generate_labels(csv_path, fsn_pdf_path):
             c.drawString(margin_left, current_y, f"Generic Name- {row['Generic Name']}")
             current_y -= 0.35 * inch
 
-            c.drawString(margin_left, current_y, f"Month & Year of Manufacturing- {row['Month & Year of Manufacturing']}")
+            mfg_text = f"Month & Year of Manufacturing- {row['Month & Year of Manufacturing']}"
+            mfg_font_size = 14
+            available_width = label_width - 2 * margin_left
+            while mfg_font_size > 8 and c.stringWidth(mfg_text, "Helvetica", mfg_font_size) > available_width:
+                mfg_font_size -= 1
+            c.setFont("Helvetica", mfg_font_size)
+            c.drawString(margin_left, current_y, mfg_text)
+            c.setFont("Helvetica", 14)
             current_y -= 0.35 * inch
 
             manufacturer = str(row['Manufactured by / Marketed by'])
