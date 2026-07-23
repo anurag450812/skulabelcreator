@@ -104,12 +104,12 @@ def compute_dynamic_defaults(row, col):
     if col == 'Dimensions (cm)':
         if 'ch' in sku_id:
             return '35*25*2 cm'
-        elif ',' in sku_id:
+        elif 'baby' in sku_id:
             return '35*6*6 cm'
         return '48*16*3 cm'
 
     if col == 'Generic Name':
-        if ',' in sku_id:
+        if 'baby' in sku_id:
             return 'poster'
         return 'painting'
 
