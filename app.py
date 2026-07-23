@@ -181,12 +181,17 @@ def read_qc_files_from_disk(saved_files, tmp_dir):
     for dest, base_lower in saved_files:
         if base_lower == 'labels.csv':
             continue
-        if not base_lower.startswith('quality_check') or not base_lower.endswith('.csv'):
+        if not base_lower.endswith('.csv'):
             continue
         try:
-            qc_df = pd.read_csv(dest)
+            try:
+                qc_df = pd.read_csv(dest, sep=None, engine='python')
+            except Exception:
+                qc_df = pd.read_csv(dest)
             qc_df.columns = qc_df.columns.str.strip()
-            generic_name = base_lower.replace('quality_check', '').replace('.csv', '').strip().lstrip('_').strip()
+            generic_name = base_lower.replace('.csv', '').strip()
+            generic_name = generic_name.replace('quality_check', '').lstrip('_').strip()
+            generic_name = generic_name.replace('qc_', '').strip()
             sku_col = None
             for col in qc_df.columns:
                 cl = col.strip().lower()
