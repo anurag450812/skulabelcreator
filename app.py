@@ -244,9 +244,8 @@ def compute_dynamic_defaults(row, col):
     return STATIC_DEFAULTS.get(col, '')
 
 def fill_qc_and_defaults(df, labels_file, qc_files, tmp_dir):
+    all_qc_data = {}
     label_categories = {}
-    sku_data = {}
-    generic_names = {}
     print(f"[QC] fill_qc_and_defaults called. labels_file: {labels_file.filename if labels_file else None}, qc_files count: {len(qc_files) if qc_files else 0}")
 
     if labels_file and labels_file.filename:
@@ -254,64 +253,78 @@ def fill_qc_and_defaults(df, labels_file, qc_files, tmp_dir):
         try:
             labels_file.save(labels_path)
             label_categories = parse_labels_csv(labels_path)
-            print(f"[QC] labels.csv parsed: {label_categories}")
+            print(f"[QC] labels.csv parsed: {list(label_categories.keys())}")
         except Exception as e:
             print(f"[QC] labels.csv error: {e}")
 
     if qc_files:
         for qc_file in qc_files:
             fname = qc_file.filename or ''
-            base_lower = os.path.basename(fname).lower()
-            print(f"[QC] Found QC file: {fname} -> base_lower={base_lower}")
-            dest = os.path.join(tmp_dir, 'qc_' + base_lower.replace('/', '_').replace('\\', '_'))
+            print(f"[QC] Found QC file: {fname}")
+            dest = os.path.join(tmp_dir, 'qc_' + os.path.basename(fname).lower().replace('/', '_').replace('\\', '_'))
             try:
                 qc_file.save(dest)
-                print(f"[QC] Saved to {dest}")
+                try:
+                    qc_df = pd.read_csv(dest, sep=None, engine='python')
+                except Exception:
+                    qc_df = pd.read_csv(dest)
+                qc_df.columns = qc_df.columns.str.strip()
+                print(f"[QC] {fname}: columns={list(qc_df.columns)}, rows={len(qc_df)}")
+                sku_col = None
+                for col in qc_df.columns:
+                    cl = col.strip().lower()
+                    if cl in ('sku', 'sku id', 'sku_id', 'skuid', 'model_number', 'model number'):
+                        sku_col = col
+                        break
+                if not sku_col:
+                    print(f"[QC] WARNING: No SKU column found in {fname}")
+                    continue
+                for _, r in qc_df.iterrows():
+                    sku_val = str(r[sku_col]).strip().lower()
+                    if not sku_val or sku_val == 'nan':
+                        continue
+                    if sku_val not in all_qc_data:
+                        all_qc_data[sku_val] = {}
+                    for col in qc_df.columns:
+                        val = r[col] if pd.notna(r[col]) else ''
+                        key = col.strip().lower()
+                        if val and key not in all_qc_data[sku_val]:
+                            all_qc_data[sku_val][key] = str(val).strip()
+                print(f"[QC] After {fname}: total SKUs = {len(all_qc_data)}")
             except Exception as e:
-                print(f"[QC] Failed to save {fname}: {e}")
+                print(f"[QC] Error processing {fname}: {e}")
+                import traceback; traceback.print_exc()
 
-    saved_files = [(os.path.join(tmp_dir, f), f) for f in os.listdir(tmp_dir) if f.startswith('qc_')]
-    if saved_files:
-        sku_data, generic_names = read_qc_files_from_disk(saved_files, tmp_dir)
-        print(f"[QC] sku_data keys: {list(sku_data.keys())[:10]}")
-        print(f"[QC] generic_names sample: {dict(list(generic_names.items())[:5])}")
+    print(f"[QC] All QC data loaded. SKUs: {list(all_qc_data.keys())[:10]}")
 
-    if sku_data and 'SKU Id' in df.columns:
-        print(f"[QC] Starting fill. df SKUs: {[str(r['SKU Id']).strip().lower() for _, r in df.iterrows()][:5]}")
+    if all_qc_data and 'SKU Id' in df.columns:
+        for field in LABEL_FIELD_MAP.values():
+            if field not in df.columns:
+                df[field] = ''
+
         for idx, row in df.iterrows():
             sku_id = str(row['SKU Id']).strip().lower()
-            if sku_id not in sku_data:
-                print(f"[QC] SKU {sku_id} NOT in sku_data")
+            if sku_id not in all_qc_data:
                 continue
-            print(f"[QC] SKU {sku_id} FOUND in sku_data")
-            qdata = sku_data[sku_id]
-            row_generic = generic_names.get(sku_id, '')
-            if row_generic and 'Generic Name' in df.columns:
-                df.at[idx, 'Generic Name'] = row_generic
-            fields = label_categories.get(row_generic, [])
-            print(f"[QC]   generic={row_generic}, fields={fields}, qdata_keys={list(qdata.keys())}")
-            for field in fields:
-                field_lower = field.lower()
-                col_name = LABEL_FIELD_MAP.get(field) or LABEL_FIELD_MAP_LOWER.get(field_lower)
-                if not col_name and field_lower.startswith(MRP_FIELD_PREFIX):
-                    col_name = 'MRP'
-                if not col_name:
-                    continue
-                if col_name not in df.columns:
-                    df[col_name] = ''
-                current_val = df.at[idx, col_name]
-                if pd.notna(current_val) and str(current_val).strip():
-                    continue
+            qdata = all_qc_data[sku_id]
+            for col_name in df.columns:
                 if col_name == 'SKU Id':
                     continue
-                raw_val = qdata.get(field_lower, '') or qdata.get(col_name.lower(), '')
-                if raw_val:
-                    df.at[idx, col_name] = str(raw_val).strip()
-
-        if 'Product Name' not in df.columns:
-            df['Product Name'] = ''
-        if 'Poster Code' not in df.columns:
-            df['Poster Code'] = ''
+                current_val = df.at[idx, col_name]
+                if pd.notna(current_val) and str(current_val).strip() and str(current_val).strip().upper() != 'N/A':
+                    continue
+                raw_val = qdata.get(col_name.lower(), '')
+                if not raw_val or raw_val.upper() == 'N/A':
+                    col_lower = col_name.lower()
+                    for qkey, qval in qdata.items():
+                        mapped = LABEL_FIELD_MAP.get(qkey) or LABEL_FIELD_MAP_LOWER.get(qkey)
+                        if not mapped and qkey.startswith(MRP_FIELD_PREFIX):
+                            mapped = 'MRP'
+                        if mapped == col_name and qval and qval.upper() != 'N/A':
+                            raw_val = qval
+                            break
+                if raw_val and raw_val.upper() != 'N/A':
+                    df.at[idx, col_name] = raw_val
 
     existing_cols = [c.strip() for c in df.columns]
     missing = [c for c in REQUIRED_COLUMNS if c not in existing_cols]
