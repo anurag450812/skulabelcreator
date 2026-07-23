@@ -97,6 +97,77 @@ def get_last_month_str():
     last_month = first_of_this_month - timedelta(days=1)
     return f"{month_name[last_month.month]} {last_month.year}"
 
+LABEL_FIELD_MAP = {
+    'model_number': 'SKU Id',
+    'brand': 'Brand',
+    'Net Quantity - 1 U': 'Net Quantity',
+    'Size - If Applicable': 'Size',
+    'Dimensions (in mm/cm) - If Applicable': 'Dimensions (cm)',
+    'MRP Rs.XXX.00 (Inclusive of all taxes)': 'MRP',
+    'Generic Name': 'Generic Name',
+    'Month & Year of Manufacturing': 'Month & Year of Manufacturing',
+    'Manufactured by / Marketed by': 'Manufactured by / Marketed by',
+    'Customer Care Details': 'Customer Care Details',
+    'EAN/FSN/LID Barcode': 'EAN/FSN/LID Barcode',
+    'title': 'Product Name',
+    'poster_code': 'Poster Code',
+}
+
+def parse_labels_csv(filepath):
+    categories = {}
+    current_cat = None
+    with open(filepath, 'r', encoding='utf-8-sig') as f:
+        for line in f:
+            stripped = line.strip()
+            if not stripped:
+                current_cat = None
+                continue
+            if not line.startswith('\t') and not line.startswith(' '):
+                current_cat = stripped.lower()
+                categories[current_cat] = []
+            elif current_cat is not None:
+                field = stripped
+                if field:
+                    categories[current_cat].append(field)
+    return categories
+
+def read_qc_files(qc_files, tmp_dir):
+    sku_data = {}
+    generic_names = {}
+    for qc_file in qc_files:
+        fname = qc_file.filename or ''
+        base_name = os.path.basename(fname)
+        base_lower = base_name.lower()
+        if base_lower == 'labels.csv':
+            continue
+        if not base_lower.startswith('quality_check') or not base_lower.endswith('.csv'):
+            continue
+        qc_path = os.path.join(tmp_dir, base_name)
+        qc_file.save(qc_path)
+        try:
+            qc_df = pd.read_csv(qc_path)
+            qc_df.columns = qc_df.columns.str.strip()
+            generic_name = base_lower.replace('quality_check', '').replace('.csv', '').strip()
+            sku_col = None
+            for col in qc_df.columns:
+                if col.strip().upper() == 'SKU':
+                    sku_col = col
+                    break
+            if not sku_col:
+                continue
+            for _, row in qc_df.iterrows():
+                sku_val = str(row[sku_col]).strip().lower()
+                if not sku_val or sku_val == 'nan':
+                    continue
+                row_data = {}
+                for col in qc_df.columns:
+                    row_data[col.strip()] = row[col] if pd.notna(row[col]) else ''
+                sku_data[sku_val] = row_data
+                generic_names[sku_val] = generic_name
+        except Exception:
+            pass
+    return sku_data, generic_names
+
 def compute_dynamic_defaults(row, col):
     sku_id = str(row.get('SKU Id', '')).strip().lower() if pd.notna(row.get('SKU Id', '')) else ''
     brand = str(row.get('Brand', '')).strip().lower() if pd.notna(row.get('Brand', '')) else ''
@@ -224,6 +295,12 @@ def generate_labels(csv_path, fsn_pdf_path):
                 dim_column = col
                 break
 
+    poster_col = None
+    for col in df.columns:
+        if col.strip().lower() == 'poster code':
+            poster_col = col
+            break
+
     for _, row in df.iterrows():
         model_number = str(row['SKU Id']).strip().lower()
         barcode_img_path = barcode_map.get(model_number)
@@ -232,6 +309,7 @@ def generate_labels(csv_path, fsn_pdf_path):
             margin_left = 0.2 * inch
             margin_top = 0.3 * inch
             margin_bottom = 0.2 * inch
+            available_width = label_width - 2 * margin_left
 
             current_y = label_height - margin_top
 
@@ -239,6 +317,32 @@ def generate_labels(csv_path, fsn_pdf_path):
             c.setFillColorRGB(0, 0, 0)
             c.drawString(margin_left, current_y, f"model_number-{model_number}")
             current_y -= 0.35 * inch
+
+            title_col = None
+            for col in df.columns:
+                if col.strip().lower() == 'product name':
+                    title_col = col
+                    break
+            if title_col:
+                raw_title = str(row[title_col]).strip() if pd.notna(row[title_col]) else ''
+                if raw_title:
+                    c.setFont("Helvetica", 9)
+                    title_text = f"title- {raw_title}"
+                    if c.stringWidth(title_text, "Helvetica", 9) > available_width:
+                        while c.stringWidth(title_text + "...", "Helvetica", 9) > available_width and len(title_text) > 7:
+                            title_text = title_text[:-1]
+                        title_text = title_text + "..."
+                    c.drawString(margin_left, current_y, title_text)
+                    c.setFont("Helvetica", 14)
+                    current_y -= 0.3 * inch
+
+            if poster_col:
+                poster_code = str(row[poster_col]).strip() if pd.notna(row[poster_col]) else ''
+                if poster_code:
+                    c.setFont("Helvetica", 9)
+                    c.drawString(margin_left, current_y, f"poster_code- {poster_code}")
+                    c.setFont("Helvetica", 14)
+                    current_y -= 0.3 * inch
 
             c.drawString(margin_left, current_y, f"brand- {row['Brand']}")
             current_y -= 0.35 * inch
@@ -446,46 +550,67 @@ def check_columns():
         df.columns = df.columns.str.strip()
         df.drop(columns=[c for c in UNNECESSARY_COLUMNS if c in df.columns], inplace=True)
 
-        # --- Fill MRP from QC folder if present ---
+        # --- Read QC folder: labels.csv + quality_check_*.csv ---
         qc_files = request.files.getlist('qc')
+        label_categories = {}
+        sku_data = {}
+        generic_names = {}
         if qc_files:
             for qc_file in qc_files:
                 fname = qc_file.filename or ''
-                base_name = os.path.basename(fname).lower()
-                if base_name.startswith('quality_check') and base_name.endswith('.csv'):
-                    qc_path = os.path.join(tmp_dir, base_name)
+                base_lower = os.path.basename(fname).lower()
+                if base_lower == 'labels.csv':
+                    qc_path = os.path.join(tmp_dir, 'labels.csv')
                     qc_file.save(qc_path)
                     try:
-                        qc_df = pd.read_csv(qc_path)
-                        sku_col = None
-                        mrp_col = None
-                        for col in qc_df.columns:
-                            if col.strip().upper() == 'SKU':
-                                sku_col = col
-                            if col.strip().upper() == 'MRP':
-                                mrp_col = col
-                        if sku_col and mrp_col:
-                            sku_mrp_map = {
-                                str(row[sku_col]).strip().lower(): str(row[mrp_col]).strip()
-                                for _, row in qc_df.iterrows()
-                                if pd.notna(row[sku_col]) and pd.notna(row[mrp_col])
-                            }
-                            if 'SKU Id' in df.columns:
-                                if 'MRP' not in df.columns:
-                                    df['MRP'] = ''
-                                for idx, row in df.iterrows():
-                                    sku_id = str(row['SKU Id']).strip().lower()
-                                    mrp_val = row.get('MRP', '')
-                                    if sku_id in sku_mrp_map and (pd.isna(mrp_val) or str(mrp_val).strip() == ''):
-                                        df.at[idx, 'MRP'] = sku_mrp_map[sku_id]
+                        label_categories = parse_labels_csv(qc_path)
                     except Exception:
                         pass
+            if qc_files:
+                sku_data, generic_names = read_qc_files(qc_files, tmp_dir)
 
+        # --- Fill columns from QC data using labels.csv categories ---
+        if sku_data and 'SKU Id' in df.columns:
+            for idx, row in df.iterrows():
+                sku_id = str(row['SKU Id']).strip().lower()
+                if sku_id not in sku_data:
+                    continue
+                qdata = sku_data[sku_id]
+                row_generic = generic_names.get(sku_id, '')
+                if row_generic and 'Generic Name' in df.columns:
+                    df.at[idx, 'Generic Name'] = row_generic
+                fields = label_categories.get(row_generic, [])
+                for field in fields:
+                    col_name = LABEL_FIELD_MAP.get(field)
+                    if not col_name:
+                        continue
+                    if col_name not in df.columns:
+                        df[col_name] = ''
+                    current_val = row.get(col_name, '')
+                    if pd.notna(current_val) and str(current_val).strip():
+                        continue
+                    if col_name == 'SKU Id':
+                        continue
+                    if col_name == 'Brand':
+                        brand_val = qdata.get('brand', '')
+                        if brand_val:
+                            df.at[idx, 'Brand'] = brand_val
+                    elif col_name == 'MRP':
+                        mrp_val = qdata.get('MRP', '')
+                        if mrp_val:
+                            df.at[idx, 'MRP'] = mrp_val
+                    elif col_name == 'Product Name':
+                        title_val = qdata.get('title', '')
+                        if title_val:
+                            df.at[idx, 'Product Name'] = title_val
+                    elif col_name == 'Poster Code':
+                        pc_val = qdata.get('poster_code', '')
+                        if pc_val:
+                            df.at[idx, 'Poster Code'] = pc_val
+
+        # --- Ensure required columns exist and fill defaults ---
         existing_cols = [c.strip() for c in df.columns]
         missing = [c for c in REQUIRED_COLUMNS if c not in existing_cols]
-
-        if not missing:
-            return jsonify({'missing': [], 'all_present': True})
 
         for col in missing:
             df[col] = ''
@@ -493,6 +618,24 @@ def check_columns():
         for idx, row in df.iterrows():
             for col in missing:
                 df.at[idx, col] = compute_dynamic_defaults(row, col)
+            if 'Size' in df.columns:
+                sv = row.get('Size', '')
+                if pd.isna(sv) or str(sv).strip() == '':
+                    df.at[idx, 'Size'] = 'medium'
+
+        # --- Check if all required data is present ---
+        if not missing and 'Brand' in df.columns:
+            empty_brands = [str(row.get('SKU Id', f'Row {i+2}')).strip()
+                            for i, row in df.iterrows()
+                            if pd.isna(row.get('Brand')) or str(row.get('Brand', '')).strip() == '']
+            if empty_brands:
+                return jsonify({
+                    'error': f'Brand is empty for the following SKUs: {", ".join(empty_brands)}. '
+                             f'Please fill all Brand cells before generating labels.'
+                }), 400
+
+        if not missing:
+            return jsonify({'missing': [], 'all_present': True})
 
         output_path = os.path.join(tmp_dir, 'Consignment_Details_Updated.csv')
         df.to_csv(output_path, index=False)
