@@ -110,7 +110,10 @@ LABEL_FIELD_MAP = {
     'EAN/FSN/LID Barcode': 'EAN/FSN/LID Barcode',
     'title': 'Product Name',
     'poster_code': 'Poster Code',
+    'mrp': 'MRP',
 }
+
+LABEL_FIELD_MAP_LOWER = {k.lower(): v for k, v in LABEL_FIELD_MAP.items()}
 
 MRP_FIELD_PREFIX = 'mrp rs'
 
@@ -143,7 +146,7 @@ def read_qc_files(qc_files, tmp_dir):
             continue
         if not base_lower.startswith('quality_check') or not base_lower.endswith('.csv'):
             continue
-        qc_path = os.path.join(tmp_dir, base_name)
+        qc_path = os.path.join(tmp_dir, 'qc_' + base_name)
         qc_file.save(qc_path)
         try:
             qc_df = pd.read_csv(qc_path)
@@ -151,11 +154,14 @@ def read_qc_files(qc_files, tmp_dir):
             generic_name = base_lower.replace('quality_check', '').replace('.csv', '').strip().lstrip('_').strip()
             sku_col = None
             for col in qc_df.columns:
-                if col.strip().upper() == 'SKU':
+                cl = col.strip().lower()
+                if cl == 'sku' or cl == 'sku id' or cl == 'sku_id' or cl == 'skuid':
                     sku_col = col
                     break
             if not sku_col:
+                print(f"[QC] WARNING: No SKU column found in {base_name}. Columns: {list(qc_df.columns)}")
                 continue
+            print(f"[QC] {base_name}: generic={generic_name}, sku_col={sku_col}, rows={len(qc_df)}")
             for _, row in qc_df.iterrows():
                 sku_val = str(row[sku_col]).strip().lower()
                 if not sku_val or sku_val == 'nan':
@@ -165,8 +171,43 @@ def read_qc_files(qc_files, tmp_dir):
                     row_data[col.strip().lower()] = row[col] if pd.notna(row[col]) else ''
                 sku_data[sku_val] = row_data
                 generic_names[sku_val] = generic_name
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[QC] Error reading {base_name}: {e}")
+    return sku_data, generic_names
+
+def read_qc_files_from_disk(saved_files, tmp_dir):
+    sku_data = {}
+    generic_names = {}
+    for dest, base_lower in saved_files:
+        if base_lower == 'labels.csv':
+            continue
+        if not base_lower.startswith('quality_check') or not base_lower.endswith('.csv'):
+            continue
+        try:
+            qc_df = pd.read_csv(dest)
+            qc_df.columns = qc_df.columns.str.strip()
+            generic_name = base_lower.replace('quality_check', '').replace('.csv', '').strip().lstrip('_').strip()
+            sku_col = None
+            for col in qc_df.columns:
+                cl = col.strip().lower()
+                if cl == 'sku' or cl == 'sku id' or cl == 'sku_id' or cl == 'skuid':
+                    sku_col = col
+                    break
+            if not sku_col:
+                print(f"[QC] WARNING: No SKU column found in {base_lower}. Columns: {list(qc_df.columns)}")
+                continue
+            print(f"[QC] {base_lower}: generic={generic_name}, sku_col={sku_col}, rows={len(qc_df)}")
+            for _, row in qc_df.iterrows():
+                sku_val = str(row[sku_col]).strip().lower()
+                if not sku_val or sku_val == 'nan':
+                    continue
+                row_data = {}
+                for col in qc_df.columns:
+                    row_data[col.strip().lower()] = row[col] if pd.notna(row[col]) else ''
+                sku_data[sku_val] = row_data
+                generic_names[sku_val] = generic_name
+        except Exception as e:
+            print(f"[QC] Error reading {base_lower}: {e}")
     return sku_data, generic_names
 
 def compute_dynamic_defaults(row, col):
@@ -201,33 +242,50 @@ def fill_qc_and_defaults(df, qc_files, tmp_dir):
     label_categories = {}
     sku_data = {}
     generic_names = {}
+    print(f"[QC] fill_qc_and_defaults called. qc_files count: {len(qc_files) if qc_files else 0}")
     if qc_files:
+        saved_files = []
         for qc_file in qc_files:
             fname = qc_file.filename or ''
             base_lower = os.path.basename(fname).lower()
+            print(f"[QC] Found file: {fname} -> base_lower={base_lower}")
+            dest = os.path.join(tmp_dir, 'qc_' + base_lower.replace('/', '_').replace('\\', '_'))
+            try:
+                qc_file.save(dest)
+                saved_files.append((dest, base_lower))
+                print(f"[QC] Saved to {dest}")
+            except Exception as e:
+                print(f"[QC] Failed to save {fname}: {e}")
+
+        for dest, base_lower in saved_files:
             if base_lower == 'labels.csv':
-                qc_path = os.path.join(tmp_dir, 'labels.csv')
-                qc_file.save(qc_path)
                 try:
-                    label_categories = parse_labels_csv(qc_path)
-                except Exception:
-                    pass
-        if qc_files:
-            sku_data, generic_names = read_qc_files(qc_files, tmp_dir)
+                    label_categories = parse_labels_csv(dest)
+                    print(f"[QC] labels.csv parsed: {label_categories}")
+                except Exception as e:
+                    print(f"[QC] labels.csv parse error: {e}")
+
+        sku_data, generic_names = read_qc_files_from_disk(saved_files, tmp_dir)
+        print(f"[QC] sku_data keys: {list(sku_data.keys())[:10]}")
+        print(f"[QC] generic_names sample: {dict(list(generic_names.items())[:5])}")
 
     if sku_data and 'SKU Id' in df.columns:
+        print(f"[QC] Starting fill. df SKUs: {[str(r['SKU Id']).strip().lower() for _, r in df.iterrows()][:5]}")
         for idx, row in df.iterrows():
             sku_id = str(row['SKU Id']).strip().lower()
             if sku_id not in sku_data:
+                print(f"[QC] SKU {sku_id} NOT in sku_data")
                 continue
+            print(f"[QC] SKU {sku_id} FOUND in sku_data")
             qdata = sku_data[sku_id]
             row_generic = generic_names.get(sku_id, '')
             if row_generic and 'Generic Name' in df.columns:
                 df.at[idx, 'Generic Name'] = row_generic
             fields = label_categories.get(row_generic, [])
+            print(f"[QC]   generic={row_generic}, fields={fields}, qdata_keys={list(qdata.keys())}")
             for field in fields:
                 field_lower = field.lower()
-                col_name = LABEL_FIELD_MAP.get(field)
+                col_name = LABEL_FIELD_MAP.get(field) or LABEL_FIELD_MAP_LOWER.get(field_lower)
                 if not col_name and field_lower.startswith(MRP_FIELD_PREFIX):
                     col_name = 'MRP'
                 if not col_name:
