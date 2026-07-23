@@ -103,7 +103,6 @@ LABEL_FIELD_MAP = {
     'Net Quantity - 1 U': 'Net Quantity',
     'Size - If Applicable': 'Size',
     'Dimensions (in mm/cm) - If Applicable': 'Dimensions (cm)',
-    'MRP Rs.XXX.00 (Inclusive of all taxes)': 'MRP',
     'Generic Name': 'Generic Name',
     'Month & Year of Manufacturing': 'Month & Year of Manufacturing',
     'Manufactured by / Marketed by': 'Manufactured by / Marketed by',
@@ -112,6 +111,8 @@ LABEL_FIELD_MAP = {
     'title': 'Product Name',
     'poster_code': 'Poster Code',
 }
+
+MRP_FIELD_PREFIX = 'mrp rs'
 
 def parse_labels_csv(filepath):
     categories = {}
@@ -161,7 +162,7 @@ def read_qc_files(qc_files, tmp_dir):
                     continue
                 row_data = {}
                 for col in qc_df.columns:
-                    row_data[col.strip()] = row[col] if pd.notna(row[col]) else ''
+                    row_data[col.strip().lower()] = row[col] if pd.notna(row[col]) else ''
                 sku_data[sku_val] = row_data
                 generic_names[sku_val] = generic_name
         except Exception:
@@ -195,6 +196,73 @@ def compute_dynamic_defaults(row, col):
         return get_last_month_str()
 
     return STATIC_DEFAULTS.get(col, '')
+
+def fill_qc_and_defaults(df, qc_files, tmp_dir):
+    label_categories = {}
+    sku_data = {}
+    generic_names = {}
+    if qc_files:
+        for qc_file in qc_files:
+            fname = qc_file.filename or ''
+            base_lower = os.path.basename(fname).lower()
+            if base_lower == 'labels.csv':
+                qc_path = os.path.join(tmp_dir, 'labels.csv')
+                qc_file.save(qc_path)
+                try:
+                    label_categories = parse_labels_csv(qc_path)
+                except Exception:
+                    pass
+        if qc_files:
+            sku_data, generic_names = read_qc_files(qc_files, tmp_dir)
+
+    if sku_data and 'SKU Id' in df.columns:
+        for idx, row in df.iterrows():
+            sku_id = str(row['SKU Id']).strip().lower()
+            if sku_id not in sku_data:
+                continue
+            qdata = sku_data[sku_id]
+            row_generic = generic_names.get(sku_id, '')
+            if row_generic and 'Generic Name' in df.columns:
+                df.at[idx, 'Generic Name'] = row_generic
+            fields = label_categories.get(row_generic, [])
+            for field in fields:
+                field_lower = field.lower()
+                col_name = LABEL_FIELD_MAP.get(field)
+                if not col_name and field_lower.startswith(MRP_FIELD_PREFIX):
+                    col_name = 'MRP'
+                if not col_name:
+                    continue
+                if col_name not in df.columns:
+                    df[col_name] = ''
+                current_val = df.at[idx, col_name]
+                if pd.notna(current_val) and str(current_val).strip():
+                    continue
+                if col_name == 'SKU Id':
+                    continue
+                raw_val = qdata.get(field_lower, '') or qdata.get(col_name.lower(), '')
+                if raw_val:
+                    df.at[idx, col_name] = str(raw_val).strip()
+
+        if 'Product Name' not in df.columns:
+            df['Product Name'] = ''
+        if 'Poster Code' not in df.columns:
+            df['Poster Code'] = ''
+
+    existing_cols = [c.strip() for c in df.columns]
+    missing = [c for c in REQUIRED_COLUMNS if c not in existing_cols]
+
+    for col in missing:
+        df[col] = ''
+
+    for idx, row in df.iterrows():
+        for col in missing:
+            df.at[idx, col] = compute_dynamic_defaults(row, col)
+        if 'Size' in df.columns:
+            sv = row.get('Size', '')
+            if pd.isna(sv) or str(sv).strip() == '':
+                df.at[idx, 'Size'] = 'medium'
+
+    return missing
 
 def take_barcode_screenshots(fsn_pdf, fsn_sku_map, output_dir):
     if not os.path.exists(output_dir):
@@ -515,6 +583,10 @@ def generate():
         df.columns = df.columns.str.strip()
         df.drop(columns=[c for c in UNNECESSARY_COLUMNS if c in df.columns], inplace=True)
 
+        qc_files = request.files.getlist('qc')
+        fill_qc_and_defaults(df, qc_files, tmp_dir)
+        df.to_csv(csv_path, index=False)
+
         if 'Brand' not in df.columns:
             return jsonify({'error': 'Brand column is missing from the consignment file'}), 400
 
@@ -563,90 +635,9 @@ def check_columns():
         df.columns = df.columns.str.strip()
         df.drop(columns=[c for c in UNNECESSARY_COLUMNS if c in df.columns], inplace=True)
 
-        # --- Read QC folder: labels.csv + quality_check_*.csv ---
+        # --- Read QC folder and fill data ---
         qc_files = request.files.getlist('qc')
-        label_categories = {}
-        sku_data = {}
-        generic_names = {}
-        if qc_files:
-            for qc_file in qc_files:
-                fname = qc_file.filename or ''
-                base_lower = os.path.basename(fname).lower()
-                if base_lower == 'labels.csv':
-                    qc_path = os.path.join(tmp_dir, 'labels.csv')
-                    qc_file.save(qc_path)
-                    try:
-                        label_categories = parse_labels_csv(qc_path)
-                    except Exception:
-                        pass
-            if qc_files:
-                sku_data, generic_names = read_qc_files(qc_files, tmp_dir)
-
-        # --- Fill columns from QC data using labels.csv categories ---
-        if sku_data and 'SKU Id' in df.columns:
-            for idx, row in df.iterrows():
-                sku_id = str(row['SKU Id']).strip().lower()
-                if sku_id not in sku_data:
-                    continue
-                qdata = sku_data[sku_id]
-                row_generic = generic_names.get(sku_id, '')
-                if row_generic and 'Generic Name' in df.columns:
-                    df.at[idx, 'Generic Name'] = row_generic
-                fields = label_categories.get(row_generic, [])
-                for field in fields:
-                    col_name = LABEL_FIELD_MAP.get(field)
-                    if not col_name:
-                        continue
-                    if col_name not in df.columns:
-                        df[col_name] = ''
-                    current_val = df.at[idx, col_name]
-                    if pd.notna(current_val) and str(current_val).strip():
-                        continue
-                    if col_name == 'SKU Id':
-                        continue
-                    if col_name == 'Brand':
-                        brand_val = qdata.get('brand', '')
-                        if brand_val:
-                            df.at[idx, 'Brand'] = str(brand_val).strip()
-                    elif col_name == 'MRP':
-                        mrp_val = qdata.get('MRP', '')
-                        if mrp_val:
-                            df.at[idx, 'MRP'] = str(mrp_val).strip()
-                    elif col_name == 'Product Name':
-                        title_val = qdata.get('title', '')
-                        if title_val:
-                            df.at[idx, 'Product Name'] = str(title_val).strip()
-                    elif col_name == 'Poster Code':
-                        pc_val = qdata.get('poster_code', '')
-                        if pc_val:
-                            df.at[idx, 'Poster Code'] = str(pc_val).strip()
-                    elif col_name not in ('Generic Name', 'Month & Year of Manufacturing',
-                                          'Manufactured by / Marketed by', 'Customer Care Details',
-                                          'EAN/FSN/LID Barcode', 'Dimensions (cm)', 'Net Quantity', 'Size'):
-                        raw_val = qdata.get(field, '') or qdata.get(col_name, '')
-                        if raw_val:
-                            df.at[idx, col_name] = str(raw_val).strip()
-
-            # Always add Product Name and Poster Code columns if missing
-            if 'Product Name' not in df.columns:
-                df['Product Name'] = ''
-            if 'Poster Code' not in df.columns:
-                df['Poster Code'] = ''
-
-        # --- Ensure required columns exist and fill defaults ---
-        existing_cols = [c.strip() for c in df.columns]
-        missing = [c for c in REQUIRED_COLUMNS if c not in existing_cols]
-
-        for col in missing:
-            df[col] = ''
-
-        for idx, row in df.iterrows():
-            for col in missing:
-                df.at[idx, col] = compute_dynamic_defaults(row, col)
-            if 'Size' in df.columns:
-                sv = row.get('Size', '')
-                if pd.isna(sv) or str(sv).strip() == '':
-                    df.at[idx, 'Size'] = 'medium'
+        missing = fill_qc_and_defaults(df, qc_files, tmp_dir)
 
         # --- Check if all required data is present ---
         if not missing and 'Brand' in df.columns:
