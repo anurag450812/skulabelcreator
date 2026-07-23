@@ -239,7 +239,7 @@ def generate_labels(csv_path, fsn_pdf_path):
             c.drawString(margin_left, current_y, f"Net Quantity - {row['Net Quantity']}")
             current_y -= 0.35 * inch
 
-            size_value = row[size_column] if size_column and pd.notna(row[size_column]) else ''
+            size_value = row[size_column] if size_column and pd.notna(row[size_column]) and str(row[size_column]).strip() else 'medium'
             c.drawString(margin_left, current_y, f"Size - {size_value}")
             current_y -= 0.35 * inch
 
@@ -397,6 +397,21 @@ def generate():
     fsn.save(fsn_path)
 
     try:
+        df = pd.read_csv(csv_path)
+        df.columns = df.columns.str.strip()
+
+        if 'Brand' not in df.columns:
+            return jsonify({'error': 'Brand column is missing from the consignment file'}), 400
+
+        empty_brands = [str(row.get('SKU Id', f'Row {i+2}')).strip()
+                        for i, row in df.iterrows()
+                        if pd.isna(row.get('Brand')) or str(row.get('Brand', '')).strip() == '']
+        if empty_brands:
+            return jsonify({
+                'error': f'Brand is empty for the following SKUs: {", ".join(empty_brands)}. '
+                         f'Please fill all Brand cells before generating labels.'
+            }), 400
+
         output_path = generate_labels(csv_path, fsn_path)
         return send_file(output_path, as_attachment=True, download_name='z_Final_SKU_Labels.pdf')
     except Exception as e:
