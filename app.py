@@ -304,89 +304,92 @@ def generate_labels(csv_path, fsn_pdf_path):
     for _, row in df.iterrows():
         model_number = str(row['SKU Id']).strip().lower()
         barcode_img_path = barcode_map.get(model_number)
+        generic_name = str(row['Generic Name']).strip().lower() if pd.notna(row['Generic Name']) else ''
+        is_poster = 'poster' in generic_name
 
         for _ in range(int(row['Quantity Sent'])):
             margin_left = 0.2 * inch
             margin_top = 0.3 * inch
             margin_bottom = 0.2 * inch
             available_width = label_width - 2 * margin_left
+            line_spacing = 0.3 * inch
 
             current_y = label_height - margin_top
 
-            c.setFont("Helvetica", 14)
+            c.setFont("Helvetica", 12)
             c.setFillColorRGB(0, 0, 0)
             c.drawString(margin_left, current_y, f"model_number-{model_number}")
-            current_y -= 0.35 * inch
+            current_y -= line_spacing
 
-            title_col = None
-            for col in df.columns:
-                if col.strip().lower() == 'product name':
-                    title_col = col
-                    break
-            if title_col:
-                raw_title = str(row[title_col]).strip() if pd.notna(row[title_col]) else ''
-                if raw_title:
-                    c.setFont("Helvetica", 9)
-                    title_text = f"title- {raw_title}"
-                    if c.stringWidth(title_text, "Helvetica", 9) > available_width:
-                        while c.stringWidth(title_text + "...", "Helvetica", 9) > available_width and len(title_text) > 7:
-                            title_text = title_text[:-1]
-                        title_text = title_text + "..."
-                    c.drawString(margin_left, current_y, title_text)
-                    c.setFont("Helvetica", 14)
-                    current_y -= 0.3 * inch
+            if is_poster:
+                title_col = None
+                for col in df.columns:
+                    if col.strip().lower() == 'product name':
+                        title_col = col
+                        break
+                if title_col:
+                    raw_title = str(row[title_col]).strip() if pd.notna(row[title_col]) else ''
+                    if raw_title:
+                        c.setFont("Helvetica", 8)
+                        title_text = f"title- {raw_title}"
+                        if c.stringWidth(title_text, "Helvetica", 8) > available_width:
+                            while c.stringWidth(title_text + "...", "Helvetica", 8) > available_width and len(title_text) > 7:
+                                title_text = title_text[:-1]
+                            title_text = title_text + "..."
+                        c.drawString(margin_left, current_y, title_text)
+                        c.setFont("Helvetica", 12)
+                        current_y -= 0.25 * inch
 
-            if poster_col:
-                poster_code = str(row[poster_col]).strip() if pd.notna(row[poster_col]) else ''
-                if poster_code:
-                    c.setFont("Helvetica", 9)
-                    c.drawString(margin_left, current_y, f"poster_code- {poster_code}")
-                    c.setFont("Helvetica", 14)
-                    current_y -= 0.3 * inch
+                if poster_col:
+                    poster_code = str(row[poster_col]).strip() if pd.notna(row[poster_col]) else ''
+                    if poster_code:
+                        c.setFont("Helvetica", 8)
+                        c.drawString(margin_left, current_y, f"poster_code- {poster_code}")
+                        c.setFont("Helvetica", 12)
+                        current_y -= 0.25 * inch
 
             c.drawString(margin_left, current_y, f"brand- {row['Brand']}")
-            current_y -= 0.35 * inch
+            current_y -= line_spacing
 
             c.drawString(margin_left, current_y, f"Net Quantity - {row['Net Quantity']}")
-            current_y -= 0.35 * inch
+            current_y -= line_spacing
 
             size_value = row[size_column] if size_column and pd.notna(row[size_column]) and str(row[size_column]).strip() else 'medium'
             c.drawString(margin_left, current_y, f"Size - {size_value}")
-            current_y -= 0.35 * inch
+            current_y -= line_spacing
 
             dim_value = row[dim_column] if dim_column and pd.notna(row[dim_column]) else ''
             c.drawString(margin_left, current_y, f"Dimensions (cm) - {dim_value}")
-            current_y -= 0.35 * inch
+            current_y -= line_spacing
 
             c.drawString(margin_left, current_y, f"MRP Rs.{row['MRP']}.00 (Inclusive of all taxes)")
-            current_y -= 0.35 * inch
+            current_y -= line_spacing
 
             c.drawString(margin_left, current_y, f"Generic Name- {row['Generic Name']}")
-            current_y -= 0.35 * inch
+            current_y -= line_spacing
 
             mfg_text = f"Month & Year of Manufacturing- {normalize_mfg_date(row['Month & Year of Manufacturing'])}"
-            mfg_font_size = 14
-            available_width = label_width - 2 * margin_left
-            while mfg_font_size > 8 and c.stringWidth(mfg_text, "Helvetica", mfg_font_size) > available_width:
+            mfg_font_size = 12
+            while mfg_font_size > 7 and c.stringWidth(mfg_text, "Helvetica", mfg_font_size) > available_width:
                 mfg_font_size -= 1
             c.setFont("Helvetica", mfg_font_size)
             c.drawString(margin_left, current_y, mfg_text)
-            c.setFont("Helvetica", 14)
-            current_y -= 0.35 * inch
+            c.setFont("Helvetica", 12)
+            current_y -= line_spacing
 
             manufacturer = str(row['Manufactured by / Marketed by'])
             c.drawString(margin_left, current_y, "Manufactured by / Marketed by-")
-            current_y -= 0.35 * inch
+            current_y -= line_spacing
             c.drawString(margin_left, current_y, manufacturer)
-            current_y -= 0.45 * inch
+            current_y -= 0.35 * inch
 
             care_details = str(row['Customer Care Details'])
             c.drawString(margin_left, current_y, "Customer Care Details-")
-            current_y -= 0.35 * inch
+            current_y -= line_spacing
             c.drawString(margin_left, current_y, care_details)
-            current_y -= 0.45 * inch
+            current_y -= 0.35 * inch
 
-            c.setFont("Helvetica", 12)
+            c.setFont("Helvetica", 10)
             c.drawString(margin_left, current_y, "EAN/FSN/LID Barcode")
             current_y -= 0.3 * inch
 
@@ -586,7 +589,7 @@ def check_columns():
                         continue
                     if col_name not in df.columns:
                         df[col_name] = ''
-                    current_val = row.get(col_name, '')
+                    current_val = df.at[idx, col_name]
                     if pd.notna(current_val) and str(current_val).strip():
                         continue
                     if col_name == 'SKU Id':
@@ -594,19 +597,31 @@ def check_columns():
                     if col_name == 'Brand':
                         brand_val = qdata.get('brand', '')
                         if brand_val:
-                            df.at[idx, 'Brand'] = brand_val
+                            df.at[idx, 'Brand'] = str(brand_val).strip()
                     elif col_name == 'MRP':
                         mrp_val = qdata.get('MRP', '')
                         if mrp_val:
-                            df.at[idx, 'MRP'] = mrp_val
+                            df.at[idx, 'MRP'] = str(mrp_val).strip()
                     elif col_name == 'Product Name':
                         title_val = qdata.get('title', '')
                         if title_val:
-                            df.at[idx, 'Product Name'] = title_val
+                            df.at[idx, 'Product Name'] = str(title_val).strip()
                     elif col_name == 'Poster Code':
                         pc_val = qdata.get('poster_code', '')
                         if pc_val:
-                            df.at[idx, 'Poster Code'] = pc_val
+                            df.at[idx, 'Poster Code'] = str(pc_val).strip()
+                    elif col_name not in ('Generic Name', 'Month & Year of Manufacturing',
+                                          'Manufactured by / Marketed by', 'Customer Care Details',
+                                          'EAN/FSN/LID Barcode', 'Dimensions (cm)', 'Net Quantity', 'Size'):
+                        raw_val = qdata.get(field, '') or qdata.get(col_name, '')
+                        if raw_val:
+                            df.at[idx, col_name] = str(raw_val).strip()
+
+            # Always add Product Name and Poster Code columns if missing
+            if 'Product Name' not in df.columns:
+                df['Product Name'] = ''
+            if 'Poster Code' not in df.columns:
+                df['Poster Code'] = ''
 
         # --- Ensure required columns exist and fill defaults ---
         existing_cols = [c.strip() for c in df.columns]
