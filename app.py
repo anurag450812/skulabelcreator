@@ -147,7 +147,7 @@ def read_qc_files(qc_files, tmp_dir):
         try:
             qc_df = pd.read_csv(qc_path)
             qc_df.columns = qc_df.columns.str.strip()
-            generic_name = base_lower.replace('quality_check', '').replace('.csv', '').strip()
+            generic_name = base_lower.replace('quality_check', '').replace('.csv', '').strip().lstrip('_').strip()
             sku_col = None
             for col in qc_df.columns:
                 if col.strip().upper() == 'SKU':
@@ -395,7 +395,7 @@ def generate_labels(csv_path, fsn_pdf_path):
 
             if barcode_img_path and os.path.exists(barcode_img_path):
                 barcode_available_height = current_y - margin_bottom
-                barcode_height = min(barcode_available_height, 2.0 * inch)
+                barcode_height = min(barcode_available_height, 1.5 * inch)
                 barcode_width = label_width - (2 * margin_left)
                 c.drawImage(
                     barcode_img_path,
@@ -526,6 +526,16 @@ def generate():
                 'error': f'Brand is empty for the following SKUs: {", ".join(empty_brands)}. '
                          f'Please fill all Brand cells before generating labels.'
             }), 400
+
+        if 'MRP' in df.columns:
+            empty_mrps = [str(row.get('SKU Id', f'Row {i+2}')).strip()
+                          for i, row in df.iterrows()
+                          if pd.isna(row.get('MRP')) or str(row.get('MRP', '')).strip() == '']
+            if empty_mrps:
+                return jsonify({
+                    'error': f'MRP is empty for the following SKUs: {", ".join(empty_mrps)}. '
+                             f'Please fill all MRP cells before generating labels.'
+                }), 400
 
         output_path = generate_labels(csv_path, fsn_path)
         return send_file(output_path, as_attachment=True, download_name='z_Final_SKU_Labels.pdf')
