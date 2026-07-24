@@ -638,47 +638,43 @@
 
                 if (contentType.includes('application/json')) {
                     const data = await checkResp.json();
-                    if (data.all_present) {
-                        statusEl.innerHTML = '<span class="spinner"></span>Generating labels...';
-                        const genResp = await fetch('/generate', { method: 'POST', body: formData });
-
-                        if (!genResp.ok) {
-                            let msg = 'Server error';
-                            try {
-                                const errData = JSON.parse(await genResp.text());
-                                msg = errData.error || msg;
-                            } catch {}
-                            throw new Error(msg);
-                        }
-
-                        const blob = await genResp.blob();
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = 'z_Final_SKU_Labels.pdf';
-                        document.body.appendChild(a);
-                        a.click();
-                        a.remove();
-                        URL.revokeObjectURL(url);
-
-                        statusEl.className = 'status success';
-                        statusEl.textContent = 'Labels generated and downloaded!';
-                        return;
-                    }
+                    throw new Error(data.error || 'Server error');
                 }
 
-                const blob = await checkResp.blob();
+                const csvBlob = await checkResp.blob();
+                const csvUrl = URL.createObjectURL(csvBlob);
+                const csvA = document.createElement('a');
+                csvA.href = csvUrl;
+                csvA.download = 'z_Consignment_Details_Updated.csv';
+                document.body.appendChild(csvA);
+                csvA.click();
+                csvA.remove();
+                URL.revokeObjectURL(csvUrl);
+
+                statusEl.innerHTML = '<span class="spinner"></span>Generating labels...';
+                const genResp = await fetch('/generate', { method: 'POST', body: formData });
+
+                if (!genResp.ok) {
+                    let msg = 'Server error';
+                    try {
+                        const errData = JSON.parse(await genResp.text());
+                        msg = errData.error || msg;
+                    } catch {}
+                    throw new Error(msg);
+                }
+
+                const blob = await genResp.blob();
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = 'z_Consignment_Details_Updated.csv';
+                a.download = 'z_Final_SKU_Labels.pdf';
                 document.body.appendChild(a);
                 a.click();
                 a.remove();
                 URL.revokeObjectURL(url);
 
-                statusEl.className = 'status error';
-                statusEl.textContent = 'Missing columns added with defaults. Download, review, and re-upload.';
+                statusEl.className = 'status success';
+                statusEl.textContent = 'Consignment updated and labels generated!';
 
             } catch (err) {
                 statusEl.className = 'status error';

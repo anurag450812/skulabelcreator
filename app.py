@@ -738,9 +738,6 @@ def check_columns():
                              f'Please fill all Brand cells before generating labels.'
                 }), 400
 
-        if not missing:
-            return jsonify({'missing': [], 'all_present': True})
-
         output_path = os.path.join(tmp_dir, 'Consignment_Details_Updated.csv')
         df.to_csv(output_path, index=False)
 
