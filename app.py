@@ -332,9 +332,17 @@ def fill_qc_and_defaults(df, labels_file, qc_files, tmp_dir):
     for col in missing:
         df[col] = ''
 
+    for col in REQUIRED_COLUMNS:
+        if col in df.columns:
+            df[col] = df[col].astype(object)
+
     for idx, row in df.iterrows():
-        for col in missing:
-            df.at[idx, col] = compute_dynamic_defaults(row, col)
+        for col in REQUIRED_COLUMNS:
+            if col not in df.columns:
+                continue
+            val = df.at[idx, col]
+            if pd.isna(val) or str(val).strip() == '' or str(val).strip().upper() == 'N/A':
+                df.at[idx, col] = compute_dynamic_defaults(row, col)
         if 'Size' in df.columns:
             sv = row.get('Size', '')
             if pd.isna(sv) or str(sv).strip() == '':
