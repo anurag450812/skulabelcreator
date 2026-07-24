@@ -243,10 +243,10 @@ def compute_dynamic_defaults(row, col):
 
     return STATIC_DEFAULTS.get(col, '')
 
-def fill_qc_and_defaults(df, labels_file, qc_files, tmp_dir, qc_text=None):
+def fill_qc_and_defaults(df, labels_file, qc_files, tmp_dir):
     all_qc_data = {}
     label_categories = {}
-    print(f"[QC] fill_qc_and_defaults called. labels_file: {labels_file.filename if labels_file else None}, qc_files count: {len(qc_files) if qc_files else 0}, qc_text: {'yes' if qc_text else 'no'}")
+    print(f"[QC] fill_qc_and_defaults called. labels_file: {labels_file.filename if labels_file else None}, qc_files count: {len(qc_files) if qc_files else 0}")
 
     if labels_file and labels_file.filename:
         labels_path = os.path.join(tmp_dir, 'labels.csv')
@@ -256,41 +256,6 @@ def fill_qc_and_defaults(df, labels_file, qc_files, tmp_dir, qc_text=None):
             print(f"[QC] labels.csv parsed: {list(label_categories.keys())}")
         except Exception as e:
             print(f"[QC] labels.csv error: {e}")
-
-    if qc_text:
-        qc_text_path = os.path.join(tmp_dir, 'qc_pasted_text.csv')
-        try:
-            with open(qc_text_path, 'w', encoding='utf-8') as f:
-                f.write(qc_text)
-            try:
-                qc_df = pd.read_csv(qc_text_path, sep=None, engine='python')
-            except Exception:
-                qc_df = pd.read_csv(qc_text_path)
-            qc_df.columns = qc_df.columns.str.strip()
-            print(f"[QC] Pasted text: columns={list(qc_df.columns)}, rows={len(qc_df)}")
-            sku_col = None
-            for col in qc_df.columns:
-                cl = col.strip().lower()
-                if cl in ('sku', 'sku id', 'sku_id', 'skuid', 'model_number', 'model number'):
-                    sku_col = col
-                    break
-            if sku_col:
-                for _, r in qc_df.iterrows():
-                    sku_val = str(r[sku_col]).strip().lower()
-                    if not sku_val or sku_val == 'nan':
-                        continue
-                    if sku_val not in all_qc_data:
-                        all_qc_data[sku_val] = {}
-                    for col in qc_df.columns:
-                        val = r[col] if pd.notna(r[col]) else ''
-                        key = col.strip().lower()
-                        if val and key not in all_qc_data[sku_val]:
-                            all_qc_data[sku_val][key] = str(val).strip()
-                print(f"[QC] After pasted text: total SKUs = {len(all_qc_data)}")
-            else:
-                print(f"[QC] WARNING: No SKU column found in pasted text")
-        except Exception as e:
-            print(f"[QC] Error processing pasted text: {e}")
 
     if qc_files:
         for qc_file in qc_files:
@@ -698,8 +663,7 @@ def generate():
 
         qc_files = request.files.getlist('qc')
         labels_file = request.files.get('labels')
-        qc_text = request.form.get('qc_text', '').strip() or None
-        fill_qc_and_defaults(df, labels_file, qc_files, tmp_dir, qc_text=qc_text)
+        fill_qc_and_defaults(df, labels_file, qc_files, tmp_dir)
         df.to_csv(csv_path, index=False)
 
         if 'Brand' not in df.columns:
@@ -753,8 +717,7 @@ def check_columns():
         # --- Read QC folder and fill data ---
         qc_files = request.files.getlist('qc')
         labels_file = request.files.get('labels')
-        qc_text = request.form.get('qc_text', '').strip() or None
-        missing = fill_qc_and_defaults(df, labels_file, qc_files, tmp_dir, qc_text=qc_text)
+        missing = fill_qc_and_defaults(df, labels_file, qc_files, tmp_dir)
 
         # --- Check if all required data is present ---
         if not missing and 'Brand' in df.columns:

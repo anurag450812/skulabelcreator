@@ -141,51 +141,6 @@
             font-size: 12px;
             word-break: break-all;
         }
-        .paste-details {
-            border: 1px solid #30363d;
-            border-radius: 8px;
-            margin-bottom: 10px;
-            background: #161b22;
-        }
-        .paste-summary {
-            padding: 10px 14px;
-            font-size: 12px;
-            color: #8b949e;
-            cursor: pointer;
-            user-select: none;
-            list-style: none;
-        }
-        .paste-summary::-webkit-details-marker { display: none; }
-        .paste-summary::before {
-            content: '\25B6';
-            margin-right: 6px;
-            font-size: 9px;
-            transition: transform 0.2s;
-        }
-        .paste-details[open] .paste-summary::before {
-            transform: rotate(90deg);
-        }
-        .paste-textarea {
-            width: 100%;
-            min-height: 120px;
-            padding: 10px 14px;
-            background: #0d1117;
-            color: #c9d1d9;
-            border: none;
-            border-top: 1px solid #30363d;
-            border-radius: 0 0 8px 8px;
-            font-family: monospace;
-            font-size: 11px;
-            resize: vertical;
-            box-sizing: border-box;
-        }
-        .paste-textarea:focus {
-            outline: none;
-            background: #161b22;
-        }
-        .paste-textarea::placeholder {
-            color: #484f58;
-        }
         .btn-row {
             display: flex;
             gap: 8px;
@@ -379,11 +334,6 @@
                     <div class="dropzone-hint">Quality_Check*.csv files for auto-filling columns</div>
                     <div class="filename" id="name-qc"></div>
                 </div>
-
-                <details class="paste-details" id="paste-details">
-                    <summary class="paste-summary">Or paste QC / Listing CSV text</summary>
-                    <textarea class="paste-textarea" id="qc-paste" placeholder="Paste CSV text here...&#10;Listing Id,FSN,SKU,MRP,FSP,Title,poster_code,Brand,model_number&#10;LST1,POSH1,0baby_1,999,115,Baby Poster,0baby_1,JB Creations,0baby_1&#10;..."></textarea>
-                </details>
 
                 <div class="btn-row">
                     <button type="submit" class="btn btn-primary" id="btn-generate" disabled>Generate Labels</button>
@@ -622,7 +572,6 @@
         const dzFsn = document.getElementById('dz-fsn');
         const dzLabels = document.getElementById('dz-labels');
         const dzQc = document.getElementById('dz-qc');
-        const qcPaste = document.getElementById('qc-paste');
         const btnGenerate = document.getElementById('btn-generate');
         const btnBoxes = document.getElementById('btn-boxes');
         const statusEl = document.getElementById('status');
@@ -671,9 +620,6 @@
                 for (let i = 0; i < fileQc.files.length; i++) {
                     formData.append('qc', fileQc.files[i]);
                 }
-            }
-            if (qcPaste.value.trim()) {
-                formData.append('qc_text', qcPaste.value.trim());
             }
 
             try {
