@@ -1174,6 +1174,12 @@ def fill_active_listings():
         adf = adf[adf[qty_col].notna() & (adf[qty_col] > 0)].copy()
         adf[qty_col] = adf[qty_col].astype(int)
 
+        cost_col = find_column(adf, ['COST PRICE', 'Cost Price', 'Cost price', 'Cost_Price', 'CostPrice', 'costprice'])
+        if not cost_col:
+            cost_col = 'COST PRICE'
+            adf[cost_col] = ''
+        adf[cost_col] = 40
+
         output_path = os.path.join(tmp_dir, 'Active_Listings_Filled.csv')
         adf.to_csv(output_path, index=False)
 
