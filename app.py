@@ -13,6 +13,7 @@ import traceback
 import io
 import csv
 import json
+import urllib.request
 from datetime import datetime, timedelta
 from calendar import month_name, month_abbr
 import re
@@ -863,6 +864,38 @@ INVENTORY_COLUMNS = {
 
 QUANTITY_PASSWORD = os.environ.get('QUANTITY_RULES_PASSWORD', '200274')
 QUANTITY_RULES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'quantity_rules.json')
+QUANTITY_RULES_KEY = 'quantity_rules'
+KV_REST_API_URL = os.environ.get('KV_REST_API_URL', '').strip()
+KV_REST_API_TOKEN = os.environ.get('KV_REST_API_TOKEN', '').strip()
+RULES_CACHE = None
+
+def kv_available():
+    return bool(KV_REST_API_URL and KV_REST_API_TOKEN)
+
+def kv_get(key):
+    if not kv_available():
+        return None
+    url = f"{KV_REST_API_URL.rstrip('/')}/get/{key}"
+    req = urllib.request.Request(url, headers={'Authorization': f'Bearer {KV_REST_API_TOKEN}'})
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        data = json.loads(resp.read().decode('utf-8'))
+    return data.get('result')
+
+def kv_set(key, value):
+    if not kv_available():
+        return
+    url = f"{KV_REST_API_URL.rstrip('/')}/set/{key}"
+    req = urllib.request.Request(
+        url,
+        data=value.encode('utf-8'),
+        headers={
+            'Authorization': f'Bearer {KV_REST_API_TOKEN}',
+            'Content-Type': 'application/json',
+        },
+        method='POST',
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        resp.read()
 
 DEFAULT_QUANTITY_RULES = [
     {'live_op': '>', 'live_val': 2, 'sales_op': '>', 'sales_val': 0, 'output': 'formula', 'multiplier': 4, 'constant': 0},
@@ -872,20 +905,47 @@ DEFAULT_QUANTITY_RULES = [
 ]
 
 def load_quantity_rules():
+    global RULES_CACHE
+    try:
+        if kv_available():
+            raw = kv_get(QUANTITY_RULES_KEY)
+            if raw:
+                data = json.loads(raw)
+                rules = data.get('rules') if isinstance(data, dict) else None
+                if isinstance(rules, list) and rules:
+                    RULES_CACHE = rules
+                    return rules
+    except Exception as e:
+        print(f"[RULES] KV read failed: {e}")
     if os.path.exists(QUANTITY_RULES_PATH):
         try:
             with open(QUANTITY_RULES_PATH, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             rules = data.get('rules')
             if isinstance(rules, list) and rules:
+                RULES_CACHE = rules
                 return rules
         except Exception as e:
             print(f"[RULES] Failed to load rules file: {e}")
+    if RULES_CACHE:
+        return RULES_CACHE
     return [dict(r) for r in DEFAULT_QUANTITY_RULES]
 
 def save_quantity_rules(rules):
-    with open(QUANTITY_RULES_PATH, 'w', encoding='utf-8') as f:
-        json.dump({'rules': rules}, f, indent=2)
+    global RULES_CACHE
+    RULES_CACHE = rules
+    payload = json.dumps({'rules': rules})
+    try:
+        if kv_available():
+            kv_set(QUANTITY_RULES_KEY, payload)
+            return
+    except Exception as e:
+        print(f"[RULES] KV write failed: {e}")
+    try:
+        with open(QUANTITY_RULES_PATH, 'w', encoding='utf-8') as f:
+            f.write(payload)
+    except Exception as e:
+        print(f"[RULES] File write failed (read-only filesystem?): {e}")
 
 def apply_op(value, op, target):
     if op == '>':
