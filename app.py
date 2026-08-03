@@ -836,6 +836,86 @@ def generate_boxes():
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
+def clean_id(value):
+    if pd.isna(value):
+        return ''
+    s = str(value).strip()
+    if s.endswith('.0') and s[:-2].isdigit():
+        s = s[:-2]
+    if s.lower() == 'nan':
+        return ''
+    return s
+
+def find_column(df, candidates):
+    clean = {c.strip().lower(): c for c in df.columns}
+    for cand in candidates:
+        if cand.lower() in clean:
+            return clean[cand.lower()]
+    return None
+
+@app.route('/compile-consignment', methods=['POST'])
+def compile_consignment():
+    files = [f for f in request.files.getlist('consignment') if f and f.filename]
+    if not files:
+        return jsonify({'error': 'At least one Consignment Details file is required'}), 400
+
+    tmp_dir = tempfile.mkdtemp()
+    frames = []
+    errors = []
+    try:
+        for f in files:
+            path = os.path.join(tmp_dir, os.path.basename(f.filename).replace('/', '_').replace('\\', '_'))
+            f.save(path)
+            try:
+                df = pd.read_csv(path)
+            except Exception:
+                df = pd.read_csv(path, sep=None, engine='python')
+            df.columns = df.columns.str.strip()
+
+            fsn_col = find_column(df, ['FSN', 'FSN Id', 'FSN_ID', 'FSNID'])
+            sku_col = find_column(df, ['SKU Id', 'SKU ID', 'SKU_Id', 'SKUID', 'SKU'])
+            qty_col = find_column(df, ['Quantity Sent', 'Quantity', 'Quantity_Sent'])
+
+            missing = []
+            if not fsn_col:
+                missing.append('FSN')
+            if not sku_col:
+                missing.append('SKU Id')
+            if not qty_col:
+                missing.append('Quantity Sent')
+            if missing:
+                errors.append(f"{f.filename}: missing columns {', '.join(missing)}")
+                continue
+
+            sub = pd.DataFrame({
+                'FSN': df[fsn_col].map(clean_id),
+                'SKU Id': df[sku_col].map(clean_id),
+                'Quantity Sent': pd.to_numeric(df[qty_col], errors='coerce'),
+            })
+            sub = sub[(sub['FSN'] != '') & (sub['SKU Id'] != '')]
+            frames.append(sub)
+
+        if not frames:
+            raise ValueError('; '.join(errors) if errors else 'No valid consignment data found')
+
+        combined = pd.concat(frames, ignore_index=True)
+        grouped = combined.groupby(['FSN', 'SKU Id'], as_index=False)['Quantity Sent'].sum()
+        grouped = grouped.dropna(subset=['Quantity Sent'])
+        grouped = grouped.sort_values('Quantity Sent', ascending=False)
+        grouped['Quantity Sent'] = grouped['Quantity Sent'].astype(int)
+
+        output_path = os.path.join(tmp_dir, 'Compiled_Consignment.csv')
+        grouped.to_csv(output_path, index=False)
+
+        return send_file(output_path, as_attachment=True,
+                         download_name='z_Compiled_Consignment.csv',
+                         mimetype='text/csv')
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
 def trim_white_margins(page, clip=None, threshold=240):
     if clip is None:
         clip = page.rect

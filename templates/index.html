@@ -295,6 +295,7 @@
             <button class="mode-btn active" data-mode="sku">SKU Labels</button>
             <button class="mode-btn" data-mode="returns">Returns Extractor</button>
             <button class="mode-btn" data-mode="salary">Salary Extractor</button>
+            <button class="mode-btn" data-mode="consignment">Consignment Creation</button>
         </div>
 
         <div class="mode-section active" id="mode-sku">
@@ -430,6 +431,27 @@
         </div>
         </div>
 
+        <div class="mode-section" id="mode-consignment">
+        <div class="card">
+            <div class="card-title">Consignment Creation</div>
+            <div class="card-desc">Drop multiple Consignment_Details CSV files to compile FSN, SKU Id and Quantity Sent into one file</div>
+
+            <form id="consignmentForm">
+                <div class="dropzone" id="dz-consignments">
+                    <input type="file" id="file-consignments" accept=".csv" multiple>
+                    <div class="dropzone-icon">📊</div>
+                    <div class="dropzone-title">Drop Consignment Files</div>
+                    <div class="dropzone-hint">CSV &bull; Consignment_Details_*.csv &bull; multiple files at once</div>
+                </div>
+
+                <div class="file-list" id="consignment-file-list"></div>
+
+                <button type="submit" class="btn btn-primary" id="btn-compile" disabled>Compile &amp; Download</button>
+            </form>
+            <div class="status" id="status-consignment"></div>
+        </div>
+        </div>
+
         <div class="footer">SKU Label Generator</div>
     </div>
 
@@ -556,6 +578,90 @@
             } finally {
                 btnExtract.disabled = false;
                 renderFileLists();
+            }
+        });
+
+        // --- Consignment Creation ---
+        const fileConsignments = document.getElementById('file-consignments');
+        const dzConsignments = document.getElementById('dz-consignments');
+        const consignmentFileList = document.getElementById('consignment-file-list');
+        const btnCompile = document.getElementById('btn-compile');
+        const statusConsignment = document.getElementById('status-consignment');
+        const consignmentForm = document.getElementById('consignmentForm');
+
+        let consignmentFiles = [];
+
+        function addConsignmentFiles(files) {
+            for (const f of files) consignmentFiles.push(f);
+            renderConsignmentList();
+        }
+
+        function renderConsignmentList() {
+            consignmentFileList.innerHTML = consignmentFiles.map((f, i) =>
+                `<div class="file-item"><span class="file-item-name">${f.name}</span><button class="file-item-remove" data-idx="${i}">&times;</button></div>`
+            ).join('');
+            btnCompile.disabled = consignmentFiles.length === 0;
+        }
+
+        consignmentFileList.addEventListener('click', e => {
+            if (e.target.classList.contains('file-item-remove')) {
+                consignmentFiles.splice(parseInt(e.target.dataset.idx), 1);
+                renderConsignmentList();
+            }
+        });
+
+        fileConsignments.addEventListener('change', () => {
+            addConsignmentFiles(Array.from(fileConsignments.files));
+            fileConsignments.value = '';
+        });
+
+        dzConsignments.addEventListener('dragover', e => { e.preventDefault(); dzConsignments.classList.add('dragover'); });
+        dzConsignments.addEventListener('dragleave', () => dzConsignments.classList.remove('dragover'));
+        dzConsignments.addEventListener('drop', e => {
+            e.preventDefault();
+            dzConsignments.classList.remove('dragover');
+            addConsignmentFiles(Array.from(e.dataTransfer.files));
+        });
+
+        consignmentForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!consignmentFiles.length) return;
+            btnCompile.disabled = true;
+            statusConsignment.className = 'status loading';
+            statusConsignment.innerHTML = '<span class="spinner"></span>Compiling consignment data...';
+
+            const formData = new FormData();
+            consignmentFiles.forEach(f => formData.append('consignment', f));
+
+            try {
+                const resp = await fetch('/compile-consignment', { method: 'POST', body: formData });
+
+                if (!resp.ok) {
+                    let msg = 'Server error';
+                    try {
+                        const data = JSON.parse(await resp.text());
+                        msg = data.error || msg;
+                    } catch {}
+                    throw new Error(msg);
+                }
+
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'z_Compiled_Consignment.csv';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+
+                statusConsignment.className = 'status success';
+                statusConsignment.textContent = 'Consignment compiled and downloaded!';
+            } catch (err) {
+                statusConsignment.className = 'status error';
+                statusConsignment.textContent = 'Error: ' + err.message;
+            } finally {
+                btnCompile.disabled = false;
             }
         });
 
