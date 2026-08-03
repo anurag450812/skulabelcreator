@@ -13,6 +13,7 @@ import traceback
 import io
 import csv
 import json
+import math
 import urllib.request
 from datetime import datetime, timedelta
 from calendar import month_name, month_abbr
@@ -1113,8 +1114,9 @@ def compile_consignment():
                 evaluate_quantity_required(rules, l, s, q)
                 for l, s, q in zip(live_numeric, sales_numeric, qty_sent)
             ]
+            merged['Quantity Rounded'] = merged['Quantity Required'].apply(lambda v: math.ceil(v / 20) * 20)
 
-            merged = merged[['Warehouse Id', 'SKU', 'Live on Website', 'Sales 7D', 'Quantity Sent', 'Quantity Required', 'FSN']]
+            merged = merged[['Warehouse Id', 'SKU', 'Live on Website', 'Sales 7D', 'Quantity Sent', 'Quantity Required', 'Quantity Rounded', 'FSN']]
             merged = merged.sort_values('Quantity Sent', ascending=False)
             output = merged
             output_path = os.path.join(tmp_dir, 'Compiled_Inventory.csv')
