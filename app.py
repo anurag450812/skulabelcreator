@@ -983,6 +983,26 @@ def compile_consignment():
             merged = inv_sub.merge(grouped_sku[['SKU', 'FSN', 'Quantity Sent']], on='SKU', how='left')
             merged = merged[['Warehouse Id', 'SKU', 'Live on Website', 'Sales 7D', 'Quantity Sent', 'FSN']]
             merged['Quantity Sent'] = merged['Quantity Sent'].fillna(0).astype(int)
+
+            live_numeric = pd.to_numeric(merged['Live on Website'], errors='coerce').fillna(0)
+            sales_numeric = pd.to_numeric(merged['Sales 7D'], errors='coerce').fillna(0)
+            qty_sent = merged['Quantity Sent'].astype(float)
+
+            def compute_quantity_required(live, sales, qty):
+                if live > 2 and sales > 0:
+                    return round(sales * 4 - live - qty)
+                if live > 2:
+                    return 0
+                if sales > 0:
+                    return round(sales * 7 - live - qty)
+                return 20
+
+            merged['Quantity Required'] = [
+                compute_quantity_required(l, s, q)
+                for l, s, q in zip(live_numeric, sales_numeric, qty_sent)
+            ]
+
+            merged = merged[['Warehouse Id', 'SKU', 'Live on Website', 'Sales 7D', 'Quantity Sent', 'Quantity Required', 'FSN']]
             merged = merged.sort_values('Quantity Sent', ascending=False)
             output = merged
             output_path = os.path.join(tmp_dir, 'Compiled_Inventory.csv')
