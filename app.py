@@ -1171,7 +1171,7 @@ def fill_active_listings():
         adf[sku_col] = adf[sku_col].map(clean_id)
         adf[qty_col] = adf[sku_col].map(mapping)
         adf[qty_col] = pd.to_numeric(adf[qty_col], errors='coerce')
-        adf = adf[adf[qty_col].notna()].copy()
+        adf = adf[adf[qty_col].notna() & (adf[qty_col] > 0)].copy()
         adf[qty_col] = adf[qty_col].astype(int)
 
         output_path = os.path.join(tmp_dir, 'Active_Listings_Filled.csv')
