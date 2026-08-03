@@ -467,7 +467,7 @@
         <div class="mode-section" id="mode-consignment">
         <div class="card">
             <div class="card-title">Consignment Creation</div>
-            <div class="card-desc">Drop multiple Consignment_Details CSVs plus a Current Inventory CSV, pick a warehouse, and compile into one file</div>
+            <div class="card-desc">Drop multiple Consignment_Details CSVs, a Current Inventory CSV, and optionally an Active Listings CSV to compile and fill</div>
 
             <form id="consignmentForm">
                 <div class="dropzone" id="dz-consignments">
@@ -490,6 +490,14 @@
                 <div id="warehouse-wrap" style="display:none;margin-bottom:12px">
                     <label style="font-size:12px;color:#8b949e;display:block;margin-bottom:6px">Select Warehouse Id</label>
                     <select id="warehouse-select" style="width:100%;padding:8px 12px;border:1px solid #30363d;border-radius:8px;background:#0d1117;color:#e1e4e8;font-size:13px;outline:none"></select>
+                </div>
+
+                <div class="dropzone" id="dz-active-listings">
+                    <input type="file" id="file-active-listings" accept=".csv">
+                    <div class="dropzone-icon">📋</div>
+                    <div class="dropzone-title">Active Listings File</div>
+                    <div class="dropzone-hint">CSV &bull; with SKU and QUANTITY columns</div>
+                    <div class="filename" id="name-active-listings"></div>
                 </div>
 
                 <button type="submit" class="btn btn-primary" id="btn-compile" disabled>Compile &amp; Download</button>
@@ -647,6 +655,9 @@
         const nameInventory = document.getElementById('name-inventory');
         const warehouseWrap = document.getElementById('warehouse-wrap');
         const warehouseSelect = document.getElementById('warehouse-select');
+        const fileActiveListings = document.getElementById('file-active-listings');
+        const dzActiveListings = document.getElementById('dz-active-listings');
+        const nameActiveListings = document.getElementById('name-active-listings');
         const btnCompile = document.getElementById('btn-compile');
         const statusConsignment = document.getElementById('status-consignment');
         const consignmentForm = document.getElementById('consignmentForm');
@@ -760,6 +771,23 @@
 
         warehouseSelect.addEventListener('change', updateCompileBtn);
 
+        fileActiveListings.addEventListener('change', () => {
+            nameActiveListings.textContent = fileActiveListings.files[0]?.name || '';
+            dzActiveListings.classList.toggle('has-file', !!fileActiveListings.files[0]);
+        });
+
+        dzActiveListings.addEventListener('dragover', e => { e.preventDefault(); dzActiveListings.classList.add('dragover'); });
+        dzActiveListings.addEventListener('dragleave', () => dzActiveListings.classList.remove('dragover'));
+        dzActiveListings.addEventListener('drop', e => {
+            e.preventDefault();
+            dzActiveListings.classList.remove('dragover');
+            if (e.dataTransfer.files.length) {
+                fileActiveListings.files = e.dataTransfer.files;
+                nameActiveListings.textContent = fileActiveListings.files[0].name;
+                dzActiveListings.classList.add('has-file');
+            }
+        });
+
         consignmentForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             if (!consignmentFiles.length) return;
@@ -772,6 +800,9 @@
             if (fileInventory.files[0]) {
                 formData.append('inventory', fileInventory.files[0]);
                 formData.append('warehouse', warehouseSelect.value);
+            }
+            if (fileActiveListings.files[0]) {
+                formData.append('active_listings', fileActiveListings.files[0]);
             }
 
             try {
@@ -798,6 +829,32 @@
 
                 statusConsignment.className = 'status success';
                 statusConsignment.textContent = 'Consignment compiled and downloaded!';
+
+                if (fileActiveListings.files[0]) {
+                    statusConsignment.className = 'status loading';
+                    statusConsignment.innerHTML = '<span class="spinner"></span>Filling active listings...';
+                    const resp2 = await fetch('/fill-active-listings', { method: 'POST', body: formData });
+                    if (!resp2.ok) {
+                        let msg = 'Server error';
+                        try {
+                            const data = JSON.parse(await resp2.text());
+                            msg = data.error || msg;
+                        } catch {}
+                        throw new Error(msg);
+                    }
+                    const blob2 = await resp2.blob();
+                    const url2 = URL.createObjectURL(blob2);
+                    const a2 = document.createElement('a');
+                    a2.href = url2;
+                    a2.download = 'z_Active_Listings_Filled.csv';
+                    document.body.appendChild(a2);
+                    a2.click();
+                    a2.remove();
+                    URL.revokeObjectURL(url2);
+
+                    statusConsignment.className = 'status success';
+                    statusConsignment.textContent = 'Compiled file and filled Active Listings downloaded!';
+                }
             } catch (err) {
                 statusConsignment.className = 'status error';
                 statusConsignment.textContent = 'Error: ' + err.message;

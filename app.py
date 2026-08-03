@@ -1002,6 +1002,116 @@ def inventory_warehouses():
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
+def build_compiled_dataframe(tmp_dir, consignment_files, inventory, warehouse):
+    frames = []
+    errors = []
+    for f in consignment_files:
+        path = os.path.join(tmp_dir, os.path.basename(f.filename).replace('/', '_').replace('\\', '_'))
+        f.save(path)
+        try:
+            df = pd.read_csv(path)
+        except Exception:
+            df = pd.read_csv(path, sep=None, engine='python')
+        df.columns = df.columns.str.strip()
+
+        fsn_col = find_column(df, ['FSN', 'FSN Id', 'FSN_ID', 'FSNID'])
+        sku_col = find_column(df, ['SKU Id', 'SKU ID', 'SKU_Id', 'SKUID', 'SKU'])
+        qty_col = find_column(df, ['Quantity Sent', 'Quantity', 'Quantity_Sent'])
+
+        missing = []
+        if not fsn_col:
+            missing.append('FSN')
+        if not sku_col:
+            missing.append('SKU Id')
+        if not qty_col:
+            missing.append('Quantity Sent')
+        if missing:
+            errors.append(f"{f.filename}: missing columns {', '.join(missing)}")
+            continue
+
+        sub = pd.DataFrame({
+            'FSN': df[fsn_col].map(clean_id),
+            'SKU Id': df[sku_col].map(clean_id),
+            'Quantity Sent': pd.to_numeric(df[qty_col], errors='coerce'),
+        })
+        sub = sub[(sub['FSN'] != '') & (sub['SKU Id'] != '')]
+        frames.append(sub)
+
+    if not frames:
+        raise ValueError('; '.join(errors) if errors else 'No valid consignment data found')
+
+    combined = pd.concat(frames, ignore_index=True)
+    grouped = combined.groupby(['FSN', 'SKU Id'], as_index=False)['Quantity Sent'].sum()
+    grouped = grouped.dropna(subset=['Quantity Sent'])
+    grouped = grouped.sort_values('Quantity Sent', ascending=False)
+    grouped['Quantity Sent'] = grouped['Quantity Sent'].astype(int)
+
+    output = grouped
+
+    if inventory and inventory.filename and warehouse:
+        inv_path = os.path.join(tmp_dir, 'inventory.csv')
+        inventory.save(inv_path)
+        inv_df = pd.read_csv(inv_path)
+        inv_df.columns = inv_df.columns.str.strip()
+
+        wh_col = find_column(inv_df, INVENTORY_COLUMNS['Warehouse Id'])
+        sku_col = find_column(inv_df, INVENTORY_COLUMNS['SKU'])
+        live_col = find_column(inv_df, INVENTORY_COLUMNS['Live on Website'])
+        sales_col = find_column(inv_df, INVENTORY_COLUMNS['Sales 7D'])
+
+        missing_inv = []
+        if not wh_col:
+            missing_inv.append('Warehouse Id')
+        if not sku_col:
+            missing_inv.append('SKU')
+        if not live_col:
+            missing_inv.append('Live on Website')
+        if not sales_col:
+            missing_inv.append('Sales 7D')
+        if missing_inv:
+            raise ValueError(f"Inventory file missing columns: {', '.join(missing_inv)}")
+
+        inv_df[wh_col] = inv_df[wh_col].map(clean_id)
+        inv_df = inv_df[inv_df[wh_col] == warehouse]
+
+        if inv_df.empty:
+            raise ValueError(f"No rows found for Warehouse Id '{warehouse}' in the inventory file")
+
+        inv_sub = pd.DataFrame({
+            'Warehouse Id': inv_df[wh_col],
+            'SKU': inv_df[sku_col].map(clean_id),
+            'Live on Website': inv_df[live_col],
+            'Sales 7D': inv_df[sales_col],
+        })
+        inv_fsn_col = find_column(inv_df, ['FSN', 'FSN Id', 'FSN_ID', 'FSNID'])
+        inv_sub['FSN_inv'] = inv_df[inv_fsn_col].map(clean_id) if inv_fsn_col else ''
+        inv_sub = inv_sub[inv_sub['SKU'] != '']
+
+        grouped_sku = grouped.rename(columns={'SKU Id': 'SKU'})
+        merged = inv_sub.merge(grouped_sku[['SKU', 'FSN', 'Quantity Sent']], on='SKU', how='left')
+        merged['FSN'] = merged['FSN'].fillna('')
+        merged['FSN_inv'] = merged['FSN_inv'].fillna('')
+        merged.loc[merged['FSN'] == '', 'FSN'] = merged.loc[merged['FSN'] == '', 'FSN_inv']
+        merged = merged[['Warehouse Id', 'SKU', 'Live on Website', 'Sales 7D', 'Quantity Sent', 'FSN']]
+        merged['Quantity Sent'] = merged['Quantity Sent'].fillna(0).astype(int)
+
+        live_numeric = pd.to_numeric(merged['Live on Website'], errors='coerce').fillna(0)
+        sales_numeric = pd.to_numeric(merged['Sales 7D'], errors='coerce').fillna(0)
+        qty_sent = merged['Quantity Sent'].astype(float)
+
+        rules = load_quantity_rules()
+        merged['Quantity Required'] = [
+            evaluate_quantity_required(rules, l, s, q)
+            for l, s, q in zip(live_numeric, sales_numeric, qty_sent)
+        ]
+        merged['Quantity Rounded'] = merged['Quantity Required'].apply(lambda v: math.ceil(v / 20) * 20)
+
+        merged = merged[['Warehouse Id', 'SKU', 'Live on Website', 'Sales 7D', 'Quantity Sent', 'Quantity Required', 'Quantity Rounded', 'FSN']]
+        merged = merged.sort_values('Quantity Sent', ascending=False)
+        output = merged
+
+    return output
+
 @app.route('/compile-consignment', methods=['POST'])
 def compile_consignment():
     files = [f for f in request.files.getlist('consignment') if f and f.filename]
@@ -1009,122 +1119,66 @@ def compile_consignment():
         return jsonify({'error': 'At least one Consignment Details file is required'}), 400
 
     tmp_dir = tempfile.mkdtemp()
-    frames = []
-    errors = []
     try:
-        for f in files:
-            path = os.path.join(tmp_dir, os.path.basename(f.filename).replace('/', '_').replace('\\', '_'))
-            f.save(path)
-            try:
-                df = pd.read_csv(path)
-            except Exception:
-                df = pd.read_csv(path, sep=None, engine='python')
-            df.columns = df.columns.str.strip()
-
-            fsn_col = find_column(df, ['FSN', 'FSN Id', 'FSN_ID', 'FSNID'])
-            sku_col = find_column(df, ['SKU Id', 'SKU ID', 'SKU_Id', 'SKUID', 'SKU'])
-            qty_col = find_column(df, ['Quantity Sent', 'Quantity', 'Quantity_Sent'])
-
-            missing = []
-            if not fsn_col:
-                missing.append('FSN')
-            if not sku_col:
-                missing.append('SKU Id')
-            if not qty_col:
-                missing.append('Quantity Sent')
-            if missing:
-                errors.append(f"{f.filename}: missing columns {', '.join(missing)}")
-                continue
-
-            sub = pd.DataFrame({
-                'FSN': df[fsn_col].map(clean_id),
-                'SKU Id': df[sku_col].map(clean_id),
-                'Quantity Sent': pd.to_numeric(df[qty_col], errors='coerce'),
-            })
-            sub = sub[(sub['FSN'] != '') & (sub['SKU Id'] != '')]
-            frames.append(sub)
-
-        if not frames:
-            raise ValueError('; '.join(errors) if errors else 'No valid consignment data found')
-
-        combined = pd.concat(frames, ignore_index=True)
-        grouped = combined.groupby(['FSN', 'SKU Id'], as_index=False)['Quantity Sent'].sum()
-        grouped = grouped.dropna(subset=['Quantity Sent'])
-        grouped = grouped.sort_values('Quantity Sent', ascending=False)
-        grouped['Quantity Sent'] = grouped['Quantity Sent'].astype(int)
-
-        output = grouped
-        output_path = os.path.join(tmp_dir, 'Compiled_Consignment.csv')
-
         inventory = request.files.get('inventory')
         warehouse = (request.form.get('warehouse') or '').strip()
-        if inventory and inventory.filename and warehouse:
-            inv_path = os.path.join(tmp_dir, 'inventory.csv')
-            inventory.save(inv_path)
-            inv_df = pd.read_csv(inv_path)
-            inv_df.columns = inv_df.columns.str.strip()
+        output = build_compiled_dataframe(tmp_dir, files, inventory, warehouse)
 
-            wh_col = find_column(inv_df, INVENTORY_COLUMNS['Warehouse Id'])
-            sku_col = find_column(inv_df, INVENTORY_COLUMNS['SKU'])
-            live_col = find_column(inv_df, INVENTORY_COLUMNS['Live on Website'])
-            sales_col = find_column(inv_df, INVENTORY_COLUMNS['Sales 7D'])
-
-            missing_inv = []
-            if not wh_col:
-                missing_inv.append('Warehouse Id')
-            if not sku_col:
-                missing_inv.append('SKU')
-            if not live_col:
-                missing_inv.append('Live on Website')
-            if not sales_col:
-                missing_inv.append('Sales 7D')
-            if missing_inv:
-                raise ValueError(f"Inventory file missing columns: {', '.join(missing_inv)}")
-
-            inv_df[wh_col] = inv_df[wh_col].map(clean_id)
-            inv_df = inv_df[inv_df[wh_col] == warehouse]
-
-            if inv_df.empty:
-                raise ValueError(f"No rows found for Warehouse Id '{warehouse}' in the inventory file")
-
-            inv_sub = pd.DataFrame({
-                'Warehouse Id': inv_df[wh_col],
-                'SKU': inv_df[sku_col].map(clean_id),
-                'Live on Website': inv_df[live_col],
-                'Sales 7D': inv_df[sales_col],
-            })
-            inv_fsn_col = find_column(inv_df, ['FSN', 'FSN Id', 'FSN_ID', 'FSNID'])
-            inv_sub['FSN_inv'] = inv_df[inv_fsn_col].map(clean_id) if inv_fsn_col else ''
-            inv_sub = inv_sub[inv_sub['SKU'] != '']
-
-            grouped_sku = grouped.rename(columns={'SKU Id': 'SKU'})
-            merged = inv_sub.merge(grouped_sku[['SKU', 'FSN', 'Quantity Sent']], on='SKU', how='left')
-            merged['FSN'] = merged['FSN'].fillna('')
-            merged['FSN_inv'] = merged['FSN_inv'].fillna('')
-            merged.loc[merged['FSN'] == '', 'FSN'] = merged.loc[merged['FSN'] == '', 'FSN_inv']
-            merged = merged[['Warehouse Id', 'SKU', 'Live on Website', 'Sales 7D', 'Quantity Sent', 'FSN']]
-            merged['Quantity Sent'] = merged['Quantity Sent'].fillna(0).astype(int)
-
-            live_numeric = pd.to_numeric(merged['Live on Website'], errors='coerce').fillna(0)
-            sales_numeric = pd.to_numeric(merged['Sales 7D'], errors='coerce').fillna(0)
-            qty_sent = merged['Quantity Sent'].astype(float)
-
-            rules = load_quantity_rules()
-            merged['Quantity Required'] = [
-                evaluate_quantity_required(rules, l, s, q)
-                for l, s, q in zip(live_numeric, sales_numeric, qty_sent)
-            ]
-            merged['Quantity Rounded'] = merged['Quantity Required'].apply(lambda v: math.ceil(v / 20) * 20)
-
-            merged = merged[['Warehouse Id', 'SKU', 'Live on Website', 'Sales 7D', 'Quantity Sent', 'Quantity Required', 'Quantity Rounded', 'FSN']]
-            merged = merged.sort_values('Quantity Sent', ascending=False)
-            output = merged
-            output_path = os.path.join(tmp_dir, 'Compiled_Inventory.csv')
-
+        output_path = os.path.join(tmp_dir, 'Compiled_Consignment.csv')
         output.to_csv(output_path, index=False)
 
         return send_file(output_path, as_attachment=True,
                          download_name='z_Compiled_Consignment.csv',
+                         mimetype='text/csv')
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+@app.route('/fill-active-listings', methods=['POST'])
+def fill_active_listings():
+    files = [f for f in request.files.getlist('consignment') if f and f.filename]
+    active = request.files.get('active_listings')
+    if not files:
+        return jsonify({'error': 'At least one Consignment Details file is required'}), 400
+    if not active or not active.filename:
+        return jsonify({'error': 'Active Listings file is required'}), 400
+
+    tmp_dir = tempfile.mkdtemp()
+    try:
+        inventory = request.files.get('inventory')
+        warehouse = (request.form.get('warehouse') or '').strip()
+        output = build_compiled_dataframe(tmp_dir, files, inventory, warehouse)
+
+        if 'Quantity Rounded' not in output.columns:
+            raise ValueError('Filling Active Listings requires the Current Inventory file and a warehouse selection')
+
+        mapping = dict(zip(output['SKU'], output['Quantity Rounded']))
+
+        path = os.path.join(tmp_dir, os.path.basename(active.filename).replace('/', '_').replace('\\', '_'))
+        active.save(path)
+        adf = pd.read_csv(path)
+        adf.columns = adf.columns.str.strip()
+
+        sku_col = find_column(adf, ['SKU', 'SKU Id', 'SKU ID', 'SKU_Id', 'SKUID'])
+        qty_col = find_column(adf, ['QUANTITY', 'Quantity', 'Quantity Required'])
+        if not sku_col:
+            raise ValueError("Active Listings file must have a 'SKU' column")
+        if not qty_col:
+            raise ValueError("Active Listings file must have a 'QUANTITY' column")
+
+        adf[sku_col] = adf[sku_col].map(clean_id)
+        adf[qty_col] = adf[sku_col].map(mapping)
+        adf[qty_col] = pd.to_numeric(adf[qty_col], errors='coerce')
+        adf = adf[adf[qty_col].notna()].copy()
+        adf[qty_col] = adf[qty_col].astype(int)
+
+        output_path = os.path.join(tmp_dir, 'Active_Listings_Filled.csv')
+        adf.to_csv(output_path, index=False)
+
+        return send_file(output_path, as_attachment=True,
+                         download_name='z_Active_Listings_Filled.csv',
                          mimetype='text/csv')
     except Exception as e:
         traceback.print_exc()
