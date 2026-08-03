@@ -1092,10 +1092,15 @@ def compile_consignment():
                 'Live on Website': inv_df[live_col],
                 'Sales 7D': inv_df[sales_col],
             })
+            inv_fsn_col = find_column(inv_df, ['FSN', 'FSN Id', 'FSN_ID', 'FSNID'])
+            inv_sub['FSN_inv'] = inv_df[inv_fsn_col].map(clean_id) if inv_fsn_col else ''
             inv_sub = inv_sub[inv_sub['SKU'] != '']
 
             grouped_sku = grouped.rename(columns={'SKU Id': 'SKU'})
             merged = inv_sub.merge(grouped_sku[['SKU', 'FSN', 'Quantity Sent']], on='SKU', how='left')
+            merged['FSN'] = merged['FSN'].fillna('')
+            merged['FSN_inv'] = merged['FSN_inv'].fillna('')
+            merged.loc[merged['FSN'] == '', 'FSN'] = merged.loc[merged['FSN'] == '', 'FSN_inv']
             merged = merged[['Warehouse Id', 'SKU', 'Live on Website', 'Sales 7D', 'Quantity Sent', 'FSN']]
             merged['Quantity Sent'] = merged['Quantity Sent'].fillna(0).astype(int)
 
