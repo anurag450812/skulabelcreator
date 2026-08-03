@@ -12,6 +12,7 @@ import traceback
 
 import io
 import csv
+import json
 from datetime import datetime, timedelta
 from calendar import month_name, month_abbr
 import re
@@ -860,6 +861,60 @@ INVENTORY_COLUMNS = {
     'Sales 7D': ['Sales 7D', 'Sales 7d', 'Sales 7 Days', 'Sales7D', 'Sales_7D', 'Sales 7D Days'],
 }
 
+QUANTITY_PASSWORD = os.environ.get('QUANTITY_RULES_PASSWORD', '200274')
+QUANTITY_RULES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'quantity_rules.json')
+
+DEFAULT_QUANTITY_RULES = [
+    {'live_op': '>', 'live_val': 2, 'sales_op': '>', 'sales_val': 0, 'output': 'formula', 'multiplier': 4, 'constant': 0},
+    {'live_op': '>', 'live_val': 2, 'sales_op': '=', 'sales_val': 0, 'output': 'constant', 'multiplier': 0, 'constant': 0},
+    {'live_op': '<=', 'live_val': 2, 'sales_op': '>', 'sales_val': 0, 'output': 'formula', 'multiplier': 7, 'constant': 0},
+    {'live_op': '<=', 'live_val': 2, 'sales_op': '=', 'sales_val': 0, 'output': 'constant', 'multiplier': 0, 'constant': 20},
+]
+
+def load_quantity_rules():
+    if os.path.exists(QUANTITY_RULES_PATH):
+        try:
+            with open(QUANTITY_RULES_PATH, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            rules = data.get('rules')
+            if isinstance(rules, list) and rules:
+                return rules
+        except Exception as e:
+            print(f"[RULES] Failed to load rules file: {e}")
+    return [dict(r) for r in DEFAULT_QUANTITY_RULES]
+
+def save_quantity_rules(rules):
+    with open(QUANTITY_RULES_PATH, 'w', encoding='utf-8') as f:
+        json.dump({'rules': rules}, f, indent=2)
+
+def apply_op(value, op, target):
+    if op == '>':
+        return value > target
+    if op == '>=':
+        return value >= target
+    if op == '<':
+        return value < target
+    if op == '<=':
+        return value <= target
+    if op == '=':
+        return value == target
+    if op == '!=':
+        return value != target
+    return False
+
+def evaluate_quantity_required(rules, live, sales, qty):
+    for rule in rules:
+        try:
+            live_ok = apply_op(live, rule.get('live_op', '>'), float(rule.get('live_val', 2)))
+            sales_ok = apply_op(sales, rule.get('sales_op', '='), float(rule.get('sales_val', 0)))
+            if live_ok and sales_ok:
+                if rule.get('output') == 'formula':
+                    return round(float(rule.get('multiplier', 0)) * sales - live - qty)
+                return int(rule.get('constant', 0))
+        except (TypeError, ValueError):
+            continue
+    return 0
+
 @app.route('/inventory-warehouses', methods=['POST'])
 def inventory_warehouses():
     inv = request.files.get('inventory')
@@ -988,17 +1043,9 @@ def compile_consignment():
             sales_numeric = pd.to_numeric(merged['Sales 7D'], errors='coerce').fillna(0)
             qty_sent = merged['Quantity Sent'].astype(float)
 
-            def compute_quantity_required(live, sales, qty):
-                if live > 2 and sales > 0:
-                    return round(sales * 4 - live - qty)
-                if live > 2:
-                    return 0
-                if sales > 0:
-                    return round(sales * 7 - live - qty)
-                return 20
-
+            rules = load_quantity_rules()
             merged['Quantity Required'] = [
-                compute_quantity_required(l, s, q)
+                evaluate_quantity_required(rules, l, s, q)
                 for l, s, q in zip(live_numeric, sales_numeric, qty_sent)
             ]
 
@@ -1017,6 +1064,43 @@ def compile_consignment():
         return jsonify({'error': str(e)}), 500
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+@app.route('/quantity-rules', methods=['GET'])
+def get_quantity_rules():
+    return jsonify({'rules': load_quantity_rules()})
+
+@app.route('/quantity-rules', methods=['POST'])
+def save_quantity_rules_route():
+    data = request.get_json(silent=True) or {}
+    password = str(data.get('password', ''))
+    if password != QUANTITY_PASSWORD:
+        return jsonify({'error': 'Incorrect password'}), 403
+
+    rules = data.get('rules')
+    if not isinstance(rules, list) or not rules:
+        return jsonify({'error': 'At least one rule is required'}), 400
+
+    valid_ops = {'>', '>=', '<', '<=', '=', '!='}
+    cleaned = []
+    for r in rules:
+        try:
+            cleaned.append({
+                'live_op': str(r.get('live_op', '>')) if str(r.get('live_op', '>')) in valid_ops else '>',
+                'live_val': float(r.get('live_val', 2)),
+                'sales_op': str(r.get('sales_op', '=')) if str(r.get('sales_op', '=')) in valid_ops else '=',
+                'sales_val': float(r.get('sales_val', 0)),
+                'output': 'formula' if r.get('output') == 'formula' else 'constant',
+                'multiplier': float(r.get('multiplier', 0)),
+                'constant': float(r.get('constant', 0)),
+            })
+        except (TypeError, ValueError):
+            continue
+
+    if not cleaned:
+        return jsonify({'error': 'No valid rules provided'}), 400
+
+    save_quantity_rules(cleaned)
+    return jsonify({'ok': True, 'rules': cleaned})
 
 def trim_white_margins(page, clip=None, threshold=240):
     if clip is None:

@@ -281,6 +281,39 @@
             border-color: #58a6ff;
             background: rgba(56,139,253,0.1);
         }
+        .rule-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            align-items: center;
+            padding: 10px;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            margin-bottom: 6px;
+            font-size: 12px;
+        }
+        .rule-row select, .rule-row input {
+            padding: 6px 8px;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            background: #161b22;
+            color: #e1e4e8;
+            font-size: 12px;
+            outline: none;
+        }
+        .rule-row input[type="number"] { width: 64px; }
+        .rule-row select { cursor: pointer; }
+        .rule-label { color: #8b949e; }
+        .rule-hint { color: #58a6ff; font-size: 11px; }
+        .rule-remove {
+            background: none;
+            border: none;
+            color: #f85149;
+            cursor: pointer;
+            font-size: 16px;
+            padding: 0 4px;
+        }
     </style>
 </head>
 <body>
@@ -462,6 +495,17 @@
                 <button type="submit" class="btn btn-primary" id="btn-compile" disabled>Compile &amp; Download</button>
             </form>
             <div class="status" id="status-consignment"></div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Quantity Required Rules</div>
+            <div class="card-desc">Rules used to compute the Quantity Required column. Edits are saved permanently and apply to new downloads.</div>
+            <div id="rules-container"></div>
+            <div style="display:flex;gap:8px;margin-top:12px">
+                <button type="button" class="btn btn-blue" id="btn-add-rule" style="flex:0 0 auto;padding:8px 14px">Add Rule</button>
+                <button type="button" class="btn btn-primary" id="btn-save-rules">Save Rules</button>
+            </div>
+            <div class="status" id="status-rules"></div>
         </div>
         </div>
 
@@ -762,6 +806,130 @@
                 updateCompileBtn();
             }
         });
+
+        // --- Quantity Required Rules ---
+        const rulesContainer = document.getElementById('rules-container');
+        const btnAddRule = document.getElementById('btn-add-rule');
+        const btnSaveRules = document.getElementById('btn-save-rules');
+        const statusRules = document.getElementById('status-rules');
+        const RULE_OPS = ['>', '>=', '<', '<=', '=', '!='];
+
+        function opOptions(sel) {
+            return RULE_OPS.map(o => `<option value="${o}"${o === sel ? ' selected' : ''}>${o}</option>`).join('');
+        }
+
+        function buildRuleRow(rule) {
+            const row = document.createElement('div');
+            row.className = 'rule-row';
+            row.innerHTML = `
+                <span class="rule-label">If Live on Website</span>
+                <select class="r-live-op">${opOptions(rule.live_op)}</select>
+                <input type="number" step="any" class="r-live-val" value="${rule.live_val}">
+                <span class="rule-label">and Sales 7D</span>
+                <select class="r-sales-op">${opOptions(rule.sales_op)}</select>
+                <input type="number" step="any" class="r-sales-val" value="${rule.sales_val}">
+                <span class="rule-label">then</span>
+                <select class="r-output">
+                    <option value="formula"${rule.output === 'formula' ? ' selected' : ''}>Formula</option>
+                    <option value="constant"${rule.output === 'constant' ? ' selected' : ''}>Fixed value</option>
+                </select>
+                <input type="number" step="any" class="r-multiplier" value="${rule.multiplier}" title="multiplier">
+                <input type="number" step="any" class="r-constant" value="${rule.constant}" title="fixed value">
+                <span class="rule-hint"></span>
+                <button type="button" class="rule-remove" title="Remove rule">&times;</button>
+            `;
+            row.querySelector('.r-output').addEventListener('change', () => updateRuleRow(row));
+            row.querySelector('.rule-remove').addEventListener('click', () => row.remove());
+            updateRuleRow(row);
+            return row;
+        }
+
+        function updateRuleRow(row) {
+            const out = row.querySelector('.r-output').value;
+            const mult = row.querySelector('.r-multiplier');
+            const cnst = row.querySelector('.r-constant');
+            const hint = row.querySelector('.rule-hint');
+            mult.style.display = out === 'formula' ? '' : 'none';
+            cnst.style.display = out === 'constant' ? '' : 'none';
+            hint.textContent = out === 'formula'
+                ? `= ${mult.value || 0} × Sales − Live − Qty Sent`
+                : `= ${cnst.value || 0}`;
+        }
+
+        rulesContainer.addEventListener('input', e => {
+            if (e.target.classList.contains('r-multiplier') || e.target.classList.contains('r-constant')) {
+                updateRuleRow(e.target.closest('.rule-row'));
+            }
+        });
+
+        btnAddRule.addEventListener('click', () => {
+            rulesContainer.appendChild(buildRuleRow({
+                live_op: '>', live_val: 2, sales_op: '>', sales_val: 0,
+                output: 'formula', multiplier: 4, constant: 0,
+            }));
+        });
+
+        btnSaveRules.addEventListener('click', async () => {
+            const rules = [];
+            rulesContainer.querySelectorAll('.rule-row').forEach(row => {
+                rules.push({
+                    live_op: row.querySelector('.r-live-op').value,
+                    live_val: parseFloat(row.querySelector('.r-live-val').value),
+                    sales_op: row.querySelector('.r-sales-op').value,
+                    sales_val: parseFloat(row.querySelector('.r-sales-val').value),
+                    output: row.querySelector('.r-output').value,
+                    multiplier: parseFloat(row.querySelector('.r-multiplier').value) || 0,
+                    constant: parseFloat(row.querySelector('.r-constant').value) || 0,
+                });
+            });
+            if (!rules.length) {
+                statusRules.className = 'status error';
+                statusRules.textContent = 'Add at least one rule before saving.';
+                return;
+            }
+            const password = prompt('Enter password to save rules:');
+            if (password === null) return;
+            btnSaveRules.disabled = true;
+            statusRules.className = 'status loading';
+            statusRules.innerHTML = '<span class="spinner"></span>Saving rules...';
+            try {
+                const resp = await fetch('/quantity-rules', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password, rules }),
+                });
+                if (!resp.ok) {
+                    let msg = 'Server error';
+                    try {
+                        const d = await resp.json();
+                        msg = d.error || msg;
+                    } catch {}
+                    throw new Error(msg);
+                }
+                const data = await resp.json();
+                rulesContainer.innerHTML = '';
+                (data.rules || []).forEach(r => rulesContainer.appendChild(buildRuleRow(r)));
+                statusRules.className = 'status success';
+                statusRules.textContent = 'Rules saved permanently!';
+            } catch (err) {
+                statusRules.className = 'status error';
+                statusRules.textContent = 'Error: ' + err.message;
+            } finally {
+                btnSaveRules.disabled = false;
+            }
+        });
+
+        (async () => {
+            try {
+                const resp = await fetch('/quantity-rules');
+                const data = await resp.json();
+                rulesContainer.innerHTML = '';
+                (data.rules || []).forEach(r => rulesContainer.appendChild(buildRuleRow(r)));
+            } catch (err) {
+                statusRules.className = 'status error';
+                statusRules.textContent = 'Failed to load rules: ' + err.message;
+            }
+        })();
 
         // --- SKU Label Generator (existing) ---
         const fileConsignment = document.getElementById('file-consignment');
