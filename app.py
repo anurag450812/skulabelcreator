@@ -1149,36 +1149,7 @@ def fill_active_listings():
     try:
         inventory = request.files.get('inventory')
         warehouse = (request.form.get('warehouse') or '').strip()
-        output = build_compiled_dataframe(tmp_dir, files, inventory, warehouse)
-
-        if 'Quantity Rounded' not in output.columns:
-            raise ValueError('Filling Active Listings requires the Current Inventory file and a warehouse selection')
-
-        mapping = dict(zip(output['SKU'], output['Quantity Rounded']))
-
-        path = os.path.join(tmp_dir, os.path.basename(active.filename).replace('/', '_').replace('\\', '_'))
-        active.save(path)
-        adf = pd.read_csv(path)
-        adf.columns = adf.columns.str.strip()
-
-        sku_col = find_column(adf, ['SKU', 'SKU Id', 'SKU ID', 'SKU_Id', 'SKUID'])
-        qty_col = find_column(adf, ['QUANTITY', 'Quantity', 'Quantity Required'])
-        if not sku_col:
-            raise ValueError("Active Listings file must have a 'SKU' column")
-        if not qty_col:
-            raise ValueError("Active Listings file must have a 'QUANTITY' column")
-
-        adf[sku_col] = adf[sku_col].map(clean_id)
-        adf[qty_col] = adf[sku_col].map(mapping)
-        adf[qty_col] = pd.to_numeric(adf[qty_col], errors='coerce')
-        adf = adf[adf[qty_col].notna() & (adf[qty_col] > 0)].copy()
-        adf[qty_col] = adf[qty_col].astype(int)
-
-        cost_col = find_column(adf, ['COST PRICE', 'Cost Price', 'Cost price', 'Cost_Price', 'CostPrice', 'costprice'])
-        if not cost_col:
-            cost_col = 'COST PRICE'
-            adf[cost_col] = ''
-        adf[cost_col] = 40
+        adf = build_filled_active_listings(tmp_dir, files, inventory, warehouse, active)
 
         output_path = os.path.join(tmp_dir, 'Active_Listings_Filled.csv')
         adf.to_csv(output_path, index=False)
@@ -1186,6 +1157,96 @@ def fill_active_listings():
         return send_file(output_path, as_attachment=True,
                          download_name='z_Active_Listings_Filled.csv',
                          mimetype='text/csv')
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+def build_filled_active_listings(tmp_dir, consignment_files, inventory, warehouse, active):
+    output = build_compiled_dataframe(tmp_dir, consignment_files, inventory, warehouse)
+
+    if 'Quantity Rounded' not in output.columns:
+        raise ValueError('Filling Active Listings requires the Current Inventory file and a warehouse selection')
+
+    mapping = dict(zip(output['SKU'], output['Quantity Rounded']))
+
+    path = os.path.join(tmp_dir, os.path.basename(active.filename).replace('/', '_').replace('\\', '_'))
+    active.save(path)
+    adf = pd.read_csv(path)
+    adf.columns = adf.columns.str.strip()
+
+    sku_col = find_column(adf, ['SKU', 'SKU Id', 'SKU ID', 'SKU_Id', 'SKUID'])
+    qty_col = find_column(adf, ['QUANTITY', 'Quantity', 'Quantity Required'])
+    if not sku_col:
+        raise ValueError("Active Listings file must have a 'SKU' column")
+    if not qty_col:
+        raise ValueError("Active Listings file must have a 'QUANTITY' column")
+
+    adf[sku_col] = adf[sku_col].map(clean_id)
+    adf[qty_col] = adf[sku_col].map(mapping)
+    adf[qty_col] = pd.to_numeric(adf[qty_col], errors='coerce')
+    adf = adf[adf[qty_col].notna() & (adf[qty_col] > 0)].copy()
+    adf[qty_col] = adf[qty_col].astype(int)
+
+    cost_col = find_column(adf, ['COST PRICE', 'Cost Price', 'Cost price', 'Cost_Price', 'CostPrice', 'costprice'])
+    if not cost_col:
+        cost_col = 'COST PRICE'
+        adf[cost_col] = ''
+    adf[cost_col] = 40
+
+    return adf
+
+@app.route('/split-active-listings', methods=['POST'])
+def split_active_listings():
+    files = [f for f in request.files.getlist('consignment') if f and f.filename]
+    active = request.files.get('active_listings')
+    if not files:
+        return jsonify({'error': 'At least one Consignment Details file is required'}), 400
+    if not active or not active.filename:
+        return jsonify({'error': 'Active Listings file is required'}), 400
+
+    tmp_dir = tempfile.mkdtemp()
+    try:
+        inventory = request.files.get('inventory')
+        warehouse = (request.form.get('warehouse') or '').strip()
+        adf = build_filled_active_listings(tmp_dir, files, inventory, warehouse, active)
+
+        sku_col = find_column(adf, ['SKU', 'SKU Id', 'SKU ID', 'SKU_Id', 'SKUID'])
+        qty_col = find_column(adf, ['QUANTITY', 'Quantity', 'Quantity Required'])
+
+        items = adf.sort_values(qty_col, ascending=False).to_dict('records')
+        bins = []
+        current = []
+        current_total = 0
+        bin_size = 200
+
+        for item in items:
+            remaining = int(item[qty_col])
+            while remaining > 0:
+                if current_total == bin_size:
+                    bins.append(current)
+                    current = []
+                    current_total = 0
+                space = bin_size - current_total
+                take = min(remaining, space)
+                copy = dict(item)
+                copy[qty_col] = take
+                current.append(copy)
+                current_total += take
+                remaining -= take
+        if current:
+            bins.append(current)
+
+        files_out = []
+        for i, bin_rows in enumerate(bins, start=1):
+            csv_content = pd.DataFrame(bin_rows).to_csv(index=False)
+            files_out.append({
+                'name': f'Active Listings {i}.csv',
+                'content': csv_content,
+            })
+
+        return jsonify({'files': files_out})
     except Exception as e:
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500

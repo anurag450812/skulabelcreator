@@ -500,7 +500,11 @@
                     <div class="filename" id="name-active-listings"></div>
                 </div>
 
-                <button type="submit" class="btn btn-primary" id="btn-compile" disabled>Compile &amp; Download</button>
+                <div class="btn-row" style="flex-wrap:wrap">
+                    <button type="button" class="btn btn-primary" id="btn-compile" disabled>Compile Consignment CSV</button>
+                    <button type="button" class="btn btn-blue" id="btn-active" disabled>Download Active Listings</button>
+                    <button type="button" class="btn btn-purple" id="btn-split-200" disabled>Download Active Listings as Set of 200</button>
+                </div>
             </form>
             <div class="status" id="status-consignment"></div>
         </div>
@@ -659,6 +663,8 @@
         const dzActiveListings = document.getElementById('dz-active-listings');
         const nameActiveListings = document.getElementById('name-active-listings');
         const btnCompile = document.getElementById('btn-compile');
+        const btnActive = document.getElementById('btn-active');
+        const btnSplit200 = document.getElementById('btn-split-200');
         const statusConsignment = document.getElementById('status-consignment');
         const consignmentForm = document.getElementById('consignmentForm');
 
@@ -666,7 +672,11 @@
         let warehousesLoaded = false;
 
         function updateCompileBtn() {
-            btnCompile.disabled = !(consignmentFiles.length > 0 && warehousesLoaded && !!warehouseSelect.value);
+            const baseReady = consignmentFiles.length > 0 && warehousesLoaded && !!warehouseSelect.value;
+            const activeReady = baseReady && !!fileActiveListings.files[0];
+            btnCompile.disabled = !baseReady;
+            btnActive.disabled = !activeReady;
+            btnSplit200.disabled = !activeReady;
         }
 
         function addConsignmentFiles(files) {
@@ -774,6 +784,7 @@
         fileActiveListings.addEventListener('change', () => {
             nameActiveListings.textContent = fileActiveListings.files[0]?.name || '';
             dzActiveListings.classList.toggle('has-file', !!fileActiveListings.files[0]);
+            updateCompileBtn();
         });
 
         dzActiveListings.addEventListener('dragover', e => { e.preventDefault(); dzActiveListings.classList.add('dragover'); });
@@ -785,16 +796,11 @@
                 fileActiveListings.files = e.dataTransfer.files;
                 nameActiveListings.textContent = fileActiveListings.files[0].name;
                 dzActiveListings.classList.add('has-file');
+                updateCompileBtn();
             }
         });
 
-        consignmentForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            if (!consignmentFiles.length) return;
-            btnCompile.disabled = true;
-            statusConsignment.className = 'status loading';
-            statusConsignment.innerHTML = '<span class="spinner"></span>Compiling consignment data...';
-
+        function buildConsignmentFormData() {
             const formData = new FormData();
             consignmentFiles.forEach(f => formData.append('consignment', f));
             if (fileInventory.files[0]) {
@@ -804,10 +810,27 @@
             if (fileActiveListings.files[0]) {
                 formData.append('active_listings', fileActiveListings.files[0]);
             }
+            return formData;
+        }
 
+        function triggerDownload(blob, filename) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        }
+
+        async function postConsignment(url, button, loadingMsg, successMsg) {
+            if (!consignmentFiles.length) return;
+            button.disabled = true;
+            statusConsignment.className = 'status loading';
+            statusConsignment.innerHTML = '<span class="spinner"></span>' + loadingMsg;
             try {
-                const resp = await fetch('/compile-consignment', { method: 'POST', body: formData });
-
+                const resp = await fetch(url, { method: 'POST', body: buildConsignmentFormData() });
                 if (!resp.ok) {
                     let msg = 'Server error';
                     try {
@@ -816,52 +839,47 @@
                     } catch {}
                     throw new Error(msg);
                 }
-
-                const blob = await resp.blob();
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = 'z_Compiled_Consignment.csv';
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-                URL.revokeObjectURL(url);
-
-                statusConsignment.className = 'status success';
-                statusConsignment.textContent = 'Consignment compiled and downloaded!';
-
-                if (fileActiveListings.files[0]) {
-                    statusConsignment.className = 'status loading';
-                    statusConsignment.innerHTML = '<span class="spinner"></span>Filling active listings...';
-                    const resp2 = await fetch('/fill-active-listings', { method: 'POST', body: formData });
-                    if (!resp2.ok) {
-                        let msg = 'Server error';
-                        try {
-                            const data = JSON.parse(await resp2.text());
-                            msg = data.error || msg;
-                        } catch {}
-                        throw new Error(msg);
-                    }
-                    const blob2 = await resp2.blob();
-                    const url2 = URL.createObjectURL(blob2);
-                    const a2 = document.createElement('a');
-                    a2.href = url2;
-                    a2.download = 'z_Active_Listings_Filled.csv';
-                    document.body.appendChild(a2);
-                    a2.click();
-                    a2.remove();
-                    URL.revokeObjectURL(url2);
-
-                    statusConsignment.className = 'status success';
-                    statusConsignment.textContent = 'Compiled file and filled Active Listings downloaded!';
-                }
+                return resp;
             } catch (err) {
                 statusConsignment.className = 'status error';
                 statusConsignment.textContent = 'Error: ' + err.message;
-            } finally {
-                btnCompile.disabled = false;
-                updateCompileBtn();
+                return null;
             }
+        }
+
+        btnCompile.addEventListener('click', async () => {
+            const resp = await postConsignment('/compile-consignment', btnCompile,
+                'Compiling consignment data...', '');
+            if (!resp) return;
+            triggerDownload(await resp.blob(), 'z_Compiled_Consignment.csv');
+            statusConsignment.className = 'status success';
+            statusConsignment.textContent = 'Consignment compiled and downloaded!';
+            updateCompileBtn();
+        });
+
+        btnActive.addEventListener('click', async () => {
+            const resp = await postConsignment('/fill-active-listings', btnActive,
+                'Filling active listings...', '');
+            if (!resp) return;
+            triggerDownload(await resp.blob(), 'z_Active_Listings_Filled.csv');
+            statusConsignment.className = 'status success';
+            statusConsignment.textContent = 'Filled Active Listings downloaded!';
+            updateCompileBtn();
+        });
+
+        btnSplit200.addEventListener('click', async () => {
+            const resp = await postConsignment('/split-active-listings', btnSplit200,
+                'Filling and splitting active listings into files of 200...', '');
+            if (!resp) return;
+            const data = await resp.json();
+            const files = data.files || [];
+            for (const f of files) {
+                triggerDownload(new Blob([f.content]), f.name);
+                await new Promise(r => setTimeout(r, 250));
+            }
+            statusConsignment.className = 'status success';
+            statusConsignment.textContent = files.length + ' file(s) of 200 downloaded!';
+            updateCompileBtn();
         });
 
         // --- Quantity Required Rules ---
