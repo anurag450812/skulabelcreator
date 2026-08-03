@@ -434,7 +434,7 @@
         <div class="mode-section" id="mode-consignment">
         <div class="card">
             <div class="card-title">Consignment Creation</div>
-            <div class="card-desc">Drop multiple Consignment_Details CSV files to compile FSN, SKU Id and Quantity Sent into one file</div>
+            <div class="card-desc">Drop multiple Consignment_Details CSVs plus a Current Inventory CSV, pick a warehouse, and compile into one file</div>
 
             <form id="consignmentForm">
                 <div class="dropzone" id="dz-consignments">
@@ -445,6 +445,19 @@
                 </div>
 
                 <div class="file-list" id="consignment-file-list"></div>
+
+                <div class="dropzone" id="dz-inventory">
+                    <input type="file" id="file-inventory" accept=".csv">
+                    <div class="dropzone-icon">🏬</div>
+                    <div class="dropzone-title">Current Inventory</div>
+                    <div class="dropzone-hint">CSV &bull; Current_Inventory_*.csv</div>
+                    <div class="filename" id="name-inventory"></div>
+                </div>
+
+                <div id="warehouse-wrap" style="display:none;margin-bottom:12px">
+                    <label style="font-size:12px;color:#8b949e;display:block;margin-bottom:6px">Select Warehouse Id</label>
+                    <select id="warehouse-select" style="width:100%;padding:8px 12px;border:1px solid #30363d;border-radius:8px;background:#0d1117;color:#e1e4e8;font-size:13px;outline:none"></select>
+                </div>
 
                 <button type="submit" class="btn btn-primary" id="btn-compile" disabled>Compile &amp; Download</button>
             </form>
@@ -585,11 +598,21 @@
         const fileConsignments = document.getElementById('file-consignments');
         const dzConsignments = document.getElementById('dz-consignments');
         const consignmentFileList = document.getElementById('consignment-file-list');
+        const fileInventory = document.getElementById('file-inventory');
+        const dzInventory = document.getElementById('dz-inventory');
+        const nameInventory = document.getElementById('name-inventory');
+        const warehouseWrap = document.getElementById('warehouse-wrap');
+        const warehouseSelect = document.getElementById('warehouse-select');
         const btnCompile = document.getElementById('btn-compile');
         const statusConsignment = document.getElementById('status-consignment');
         const consignmentForm = document.getElementById('consignmentForm');
 
         let consignmentFiles = [];
+        let warehousesLoaded = false;
+
+        function updateCompileBtn() {
+            btnCompile.disabled = !(consignmentFiles.length > 0 && warehousesLoaded && !!warehouseSelect.value);
+        }
 
         function addConsignmentFiles(files) {
             for (const f of files) consignmentFiles.push(f);
@@ -600,7 +623,7 @@
             consignmentFileList.innerHTML = consignmentFiles.map((f, i) =>
                 `<div class="file-item"><span class="file-item-name">${f.name}</span><button class="file-item-remove" data-idx="${i}">&times;</button></div>`
             ).join('');
-            btnCompile.disabled = consignmentFiles.length === 0;
+            updateCompileBtn();
         }
 
         consignmentFileList.addEventListener('click', e => {
@@ -623,6 +646,76 @@
             addConsignmentFiles(Array.from(e.dataTransfer.files));
         });
 
+        function loadWarehouses() {
+            if (!fileInventory.files[0]) return;
+            statusConsignment.className = 'status loading';
+            statusConsignment.innerHTML = '<span class="spinner"></span>Reading inventory warehouse ids...';
+            warehousesLoaded = false;
+            warehouseWrap.style.display = 'none';
+            updateCompileBtn();
+
+            const fd = new FormData();
+            fd.append('inventory', fileInventory.files[0]);
+
+            fetch('/inventory-warehouses', { method: 'POST', body: fd })
+                .then(async resp => {
+                    if (!resp.ok) {
+                        let msg = 'Server error';
+                        try {
+                            const d = JSON.parse(await resp.text());
+                            msg = d.error || msg;
+                        } catch {}
+                        throw new Error(msg);
+                    }
+                    return resp.json();
+                })
+                .then(data => {
+                    const warehouses = data.warehouses || [];
+                    warehouseSelect.innerHTML = '';
+                    warehouses.forEach(w => {
+                        const opt = document.createElement('option');
+                        opt.value = w;
+                        opt.textContent = w;
+                        warehouseSelect.appendChild(opt);
+                    });
+                    if (warehouses.length > 0) {
+                        warehouseWrap.style.display = '';
+                        warehousesLoaded = true;
+                        statusConsignment.className = 'status success';
+                        statusConsignment.textContent = `Inventory loaded. ${warehouses.length} warehouse(s) found. Select one to compile.`;
+                    } else {
+                        statusConsignment.className = 'status error';
+                        statusConsignment.textContent = 'No warehouse ids found in the inventory file.';
+                    }
+                    updateCompileBtn();
+                })
+                .catch(err => {
+                    statusConsignment.className = 'status error';
+                    statusConsignment.textContent = 'Error: ' + err.message;
+                });
+        }
+
+        fileInventory.addEventListener('change', () => {
+            nameInventory.textContent = fileInventory.files[0]?.name || '';
+            dzInventory.classList.toggle('has-file', !!fileInventory.files[0]);
+            loadWarehouses();
+        });
+
+        dzInventory.addEventListener('dragover', e => { e.preventDefault(); dzInventory.classList.add('dragover'); });
+        dzInventory.addEventListener('dragleave', () => dzInventory.classList.remove('dragover'));
+        dzInventory.addEventListener('drop', e => {
+            e.preventDefault();
+            dzInventory.classList.remove('dragover');
+            if (e.dataTransfer.files.length) {
+                fileInventory.files = e.dataTransfer.files;
+                nameInventory.textContent = fileInventory.files[0].name;
+                dzInventory.classList.add('has-file');
+                loadWarehouses();
+            }
+        });
+
+        warehouseSelect.addEventListener('change', updateCompileBtn);
+
         consignmentForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             if (!consignmentFiles.length) return;
@@ -632,6 +725,10 @@
 
             const formData = new FormData();
             consignmentFiles.forEach(f => formData.append('consignment', f));
+            if (fileInventory.files[0]) {
+                formData.append('inventory', fileInventory.files[0]);
+                formData.append('warehouse', warehouseSelect.value);
+            }
 
             try {
                 const resp = await fetch('/compile-consignment', { method: 'POST', body: formData });
@@ -662,6 +759,7 @@
                 statusConsignment.textContent = 'Error: ' + err.message;
             } finally {
                 btnCompile.disabled = false;
+                updateCompileBtn();
             }
         });
 

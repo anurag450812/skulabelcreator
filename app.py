@@ -853,6 +853,39 @@ def find_column(df, candidates):
             return clean[cand.lower()]
     return None
 
+INVENTORY_COLUMNS = {
+    'Warehouse Id': ['Warehouse Id', 'Warehouse ID', 'Warehouse_Id', 'WarehouseID', 'WH Id'],
+    'SKU': ['SKU', 'SKU Id', 'SKU ID', 'SKU_Id', 'SKUID'],
+    'Live on Website': ['Live on Website', 'Live On Website', 'Live on website', 'Live_on_Website', 'LiveOnWebsite'],
+    'Sales 7D': ['Sales 7D', 'Sales 7d', 'Sales 7 Days', 'Sales7D', 'Sales_7D', 'Sales 7D Days'],
+}
+
+@app.route('/inventory-warehouses', methods=['POST'])
+def inventory_warehouses():
+    inv = request.files.get('inventory')
+    if not inv or not inv.filename:
+        return jsonify({'error': 'Current Inventory file is required'}), 400
+
+    tmp_dir = tempfile.mkdtemp()
+    try:
+        path = os.path.join(tmp_dir, 'inventory.csv')
+        inv.save(path)
+        df = pd.read_csv(path)
+        df.columns = df.columns.str.strip()
+
+        wh_col = find_column(df, INVENTORY_COLUMNS['Warehouse Id'])
+        if not wh_col:
+            return jsonify({'error': 'Warehouse Id column not found in the inventory file'}), 400
+
+        warehouses = [clean_id(x) for x in df[wh_col].unique()]
+        warehouses = sorted({w for w in warehouses if w != ''})
+        return jsonify({'warehouses': warehouses})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
 @app.route('/compile-consignment', methods=['POST'])
 def compile_consignment():
     files = [f for f in request.files.getlist('consignment') if f and f.filename]
@@ -904,8 +937,57 @@ def compile_consignment():
         grouped = grouped.sort_values('Quantity Sent', ascending=False)
         grouped['Quantity Sent'] = grouped['Quantity Sent'].astype(int)
 
+        output = grouped
         output_path = os.path.join(tmp_dir, 'Compiled_Consignment.csv')
-        grouped.to_csv(output_path, index=False)
+
+        inventory = request.files.get('inventory')
+        warehouse = (request.form.get('warehouse') or '').strip()
+        if inventory and inventory.filename and warehouse:
+            inv_path = os.path.join(tmp_dir, 'inventory.csv')
+            inventory.save(inv_path)
+            inv_df = pd.read_csv(inv_path)
+            inv_df.columns = inv_df.columns.str.strip()
+
+            wh_col = find_column(inv_df, INVENTORY_COLUMNS['Warehouse Id'])
+            sku_col = find_column(inv_df, INVENTORY_COLUMNS['SKU'])
+            live_col = find_column(inv_df, INVENTORY_COLUMNS['Live on Website'])
+            sales_col = find_column(inv_df, INVENTORY_COLUMNS['Sales 7D'])
+
+            missing_inv = []
+            if not wh_col:
+                missing_inv.append('Warehouse Id')
+            if not sku_col:
+                missing_inv.append('SKU')
+            if not live_col:
+                missing_inv.append('Live on Website')
+            if not sales_col:
+                missing_inv.append('Sales 7D')
+            if missing_inv:
+                raise ValueError(f"Inventory file missing columns: {', '.join(missing_inv)}")
+
+            inv_df[wh_col] = inv_df[wh_col].map(clean_id)
+            inv_df = inv_df[inv_df[wh_col] == warehouse]
+
+            if inv_df.empty:
+                raise ValueError(f"No rows found for Warehouse Id '{warehouse}' in the inventory file")
+
+            inv_sub = pd.DataFrame({
+                'Warehouse Id': inv_df[wh_col],
+                'SKU': inv_df[sku_col].map(clean_id),
+                'Live on Website': inv_df[live_col],
+                'Sales 7D': inv_df[sales_col],
+            })
+            inv_sub = inv_sub[inv_sub['SKU'] != '']
+
+            grouped_sku = grouped.rename(columns={'SKU Id': 'SKU'})
+            merged = inv_sub.merge(grouped_sku[['SKU', 'FSN', 'Quantity Sent']], on='SKU', how='left')
+            merged = merged[['Warehouse Id', 'SKU', 'Live on Website', 'Sales 7D', 'Quantity Sent', 'FSN']]
+            merged['Quantity Sent'] = merged['Quantity Sent'].fillna(0).astype(int)
+            merged = merged.sort_values('Quantity Sent', ascending=False)
+            output = merged
+            output_path = os.path.join(tmp_dir, 'Compiled_Inventory.csv')
+
+        output.to_csv(output_path, index=False)
 
         return send_file(output_path, as_attachment=True,
                          download_name='z_Compiled_Consignment.csv',
