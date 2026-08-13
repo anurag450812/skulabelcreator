@@ -314,9 +314,83 @@
             font-size: 16px;
             padding: 0 4px;
         }
+        .overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(13, 17, 23, 0.95);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .overlay.hidden { display: none; }
+        .overlay-card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 32px;
+            width: 100%;
+            max-width: 340px;
+            text-align: center;
+        }
+        .overlay-card .logo { margin-bottom: 16px; }
+        .overlay-card h2 {
+            font-size: 16px;
+            font-weight: 600;
+            color: #f0f6fc;
+            margin-bottom: 6px;
+        }
+        .overlay-card p {
+            color: #8b949e;
+            font-size: 12px;
+            margin-bottom: 20px;
+        }
+        .overlay-input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            background: #0d1117;
+            color: #e1e4e8;
+            font-size: 18px;
+            letter-spacing: 4px;
+            text-align: center;
+            outline: none;
+            margin-bottom: 12px;
+        }
+        .overlay-input:focus { border-color: #58a6ff; }
+        .overlay-error {
+            color: #f85149;
+            font-size: 12px;
+            min-height: 18px;
+            margin-bottom: 8px;
+        }
+        .overlay-btn {
+            width: 100%;
+            padding: 10px 16px;
+            border: none;
+            border-radius: 8px;
+            background: #238636;
+            color: #fff;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .overlay-btn:hover { background: #2ea043; }
     </style>
 </head>
 <body>
+    <div class="overlay hidden" id="device-overlay">
+        <div class="overlay-card">
+            <div class="logo">S</div>
+            <h2>Verify Device</h2>
+            <p>Enter the device verification passcode to continue.</p>
+            <input type="password" class="overlay-input" id="device-passcode" placeholder="Passcode" inputmode="numeric" autocomplete="off">
+            <div class="overlay-error" id="device-error"></div>
+            <button type="button" class="overlay-btn" id="btn-verify-device">Verify</button>
+        </div>
+    </div>
+
     <div class="container">
         <div class="header">
             <div class="logo">S</div>
@@ -525,6 +599,59 @@
     </div>
 
     <script>
+        // --- Device Verification ---
+        const deviceOverlay = document.getElementById('device-overlay');
+        const devicePasscode = document.getElementById('device-passcode');
+        const deviceError = document.getElementById('device-error');
+        const btnVerifyDevice = document.getElementById('btn-verify-device');
+        const DEVICE_KEY = 'sku_label_creator_device_verified';
+
+        async function verifyDevice() {
+            const passcode = devicePasscode.value.trim();
+            if (!passcode) {
+                deviceError.textContent = 'Enter the passcode.';
+                devicePasscode.focus();
+                return;
+            }
+            btnVerifyDevice.disabled = true;
+            deviceError.textContent = '';
+            try {
+                const resp = await fetch('/verify-device', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ passcode }),
+                });
+                if (!resp.ok) {
+                    let msg = 'Incorrect passcode';
+                    try {
+                        const d = await resp.json();
+                        msg = d.error || msg;
+                    } catch {}
+                    throw new Error(msg);
+                }
+                localStorage.setItem(DEVICE_KEY, 'true');
+                deviceOverlay.classList.add('hidden');
+            } catch (err) {
+                deviceError.textContent = err.message;
+            } finally {
+                btnVerifyDevice.disabled = false;
+                devicePasscode.value = '';
+                devicePasscode.focus();
+            }
+        }
+
+        if (localStorage.getItem(DEVICE_KEY) === 'true') {
+            deviceOverlay.classList.add('hidden');
+        } else {
+            deviceOverlay.classList.remove('hidden');
+            devicePasscode.focus();
+        }
+
+        btnVerifyDevice.addEventListener('click', verifyDevice);
+        devicePasscode.addEventListener('keydown', e => {
+            if (e.key === 'Enter') { e.preventDefault(); verifyDevice(); }
+        });
+
         // --- Mode Toggle ---
         const modeBtns = document.querySelectorAll('.mode-btn');
         const modeSections = document.querySelectorAll('.mode-section');

@@ -649,6 +649,14 @@ def process_flipkart(filepath):
 def index():
     return render_template('index.html')
 
+@app.route('/verify-device', methods=['POST'])
+def verify_device():
+    data = request.get_json(silent=True) or {}
+    passcode = str(data.get('passcode', ''))
+    if passcode == DEVICE_PASSCODE:
+        return jsonify({'ok': True})
+    return jsonify({'error': 'Incorrect passcode'}), 403
+
 @app.route('/generate', methods=['POST'])
 def generate():
     if 'consignment' not in request.files or 'fsn' not in request.files:
@@ -862,6 +870,8 @@ INVENTORY_COLUMNS = {
     'Live on Website': ['Live on Website', 'Live On Website', 'Live on website', 'Live_on_Website', 'LiveOnWebsite'],
     'Sales 7D': ['Sales 7D', 'Sales 7d', 'Sales 7 Days', 'Sales7D', 'Sales_7D', 'Sales 7D Days'],
 }
+
+DEVICE_PASSCODE = os.environ.get('DEVICE_PASSCODE', '200274')
 
 QUANTITY_PASSWORD = os.environ.get('QUANTITY_RULES_PASSWORD', '200274')
 QUANTITY_RULES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'quantity_rules.json')
