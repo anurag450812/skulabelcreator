@@ -1381,6 +1381,17 @@ def crop_box_labels():
     try:
         boxlabels.save(pdf_path)
         doc = fitz.open(pdf_path)
+
+        for i in range(len(doc) - 1, -1, -1):
+            page = doc[i]
+            if (not page.get_text().strip()
+                    and not page.get_images()
+                    and not page.get_drawings()):
+                doc.delete_page(i)
+
+        if len(doc) == 0:
+            return jsonify({'error': 'The PDF contains no pages with content'}), 400
+
         output_doc = fitz.open()
 
         for page_num in range(len(doc)):
