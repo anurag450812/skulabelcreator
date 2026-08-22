@@ -1366,6 +1366,13 @@ def trim_white_margins(page, clip=None, threshold=240):
         clip.y0 + min(bottom * scale + 2, clip.height),
     )
 
+def stamp_label_date(page, date_text, fontsize=9, margin=4):
+    text_width = fitz.get_text_length(date_text, fontname='helv', fontsize=fontsize)
+    x = page.rect.width - text_width - margin
+    y = page.rect.height - margin
+    page.insert_text(fitz.Point(x, y), date_text,
+                     fontname='helv', fontsize=fontsize, color=(0, 0, 0))
+
 @app.route('/crop-box-labels', methods=['POST'])
 def crop_box_labels():
     if 'boxlabels' not in request.files:
@@ -1374,6 +1381,14 @@ def crop_box_labels():
     boxlabels = request.files['boxlabels']
     if not boxlabels.filename:
         return jsonify({'error': 'Box labels PDF is required'}), 400
+
+    label_date = (request.form.get('label_date') or '').strip()
+    if not label_date:
+        return jsonify({'error': 'Label date is required'}), 400
+    try:
+        datetime.strptime(label_date, '%d/%m/%y')
+    except ValueError:
+        return jsonify({'error': 'Invalid label date format. Use DD/MM/YY'}), 400
 
     tmp_dir = tempfile.mkdtemp()
     pdf_path = os.path.join(tmp_dir, boxlabels.filename)
@@ -1404,6 +1419,7 @@ def crop_box_labels():
                 trimmed = trim_white_margins(page)
                 new_page = output_doc.new_page(width=trimmed.width, height=trimmed.height)
                 new_page.show_pdf_page(new_page.rect, doc, page_num, clip=trimmed)
+                stamp_label_date(new_page, label_date)
                 continue
 
             y_positions = sorted([r.y0 for r in box_id_instances])
@@ -1419,6 +1435,7 @@ def crop_box_labels():
                 trimmed = trim_white_margins(page, clip=clip)
                 new_page = output_doc.new_page(width=trimmed.width, height=trimmed.height)
                 new_page.show_pdf_page(new_page.rect, doc, page_num, clip=trimmed)
+                stamp_label_date(new_page, label_date)
 
         output_path = os.path.join(tmp_dir, 'Cropped_Box_Labels.pdf')
         output_doc.save(output_path)
