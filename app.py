@@ -837,6 +837,7 @@ def generate_boxes():
             name_parts = [f"{s}({q})" for (f, s), q in counts.items()]
             box_name = f"{box_number}_{''.join(name_parts)}"
 
+            nominal_value = 600 // len(counts)
             for (fsn, sku), qty in counts.items():
                 output_rows.append({
                     'BOX NUMBER': box_number,
@@ -845,7 +846,7 @@ def generate_boxes():
                     'BREADTH (cm)': 40,
                     'HEIGHT (cm)': 35,
                     'WEIGHT (kg)': 12,
-                    'NOMINAL VALUE (INR)': 600,
+                    'NOMINAL VALUE (INR)': nominal_value,
                     'FSN': fsn,
                     'QUANTITY': qty,
                 })
