@@ -782,7 +782,8 @@ def generate_boxes():
         output_rows = []
         box_number = 1
 
-        # Aggregate quantity per SKU (same SKU may appear across multiple rows)
+        # Aggregate quantity per SKU (same SKU may appear across multiple rows),
+        # then process the most-quantity SKUs first
         sku_agg = {}
         for _, row in df.iterrows():
             fsn = str(row['FSN']).strip()
@@ -792,8 +793,9 @@ def generate_boxes():
                 sku_agg[sku] = {'fsn': fsn, 'qty': 0}
             sku_agg[sku]['qty'] += qty
 
-        # Find the most-quantity items first, then move to the remaining SKUs
-        for sku, info in sorted(sku_agg.items(), key=lambda x: x[1]['qty'], reverse=True):
+        items = sorted(sku_agg.items(), key=lambda x: x[1]['qty'], reverse=True)
+
+        for sku, info in items:
             fsn = info['fsn']
             qty = info['qty']
 
@@ -812,20 +814,42 @@ def generate_boxes():
                 })
                 box_number += 1
 
-            remainder = qty % box_size
-            if remainder > 0:
+        # Combine leftover quantities (less than 20) into full boxes,
+        # biggest remainders first, so every box is filled to exactly 20 where possible
+        remainders = [{'fsn': info['fsn'], 'sku': sku, 'qty': info['qty'] % box_size}
+                      for sku, info in items if info['qty'] % box_size > 0]
+        remainders.sort(key=lambda r: r['qty'], reverse=True)
+
+        idx = 0
+        while idx < len(remainders):
+            counts = {}
+            space = box_size
+            while space > 0 and idx < len(remainders):
+                r = remainders[idx]
+                take = min(r['qty'], space)
+                key = (r['fsn'], r['sku'])
+                counts[key] = counts.get(key, 0) + take
+                r['qty'] -= take
+                space -= take
+                if r['qty'] == 0:
+                    idx += 1
+
+            name_parts = [f"{s}({q})" for (f, s), q in counts.items()]
+            box_name = f"{box_number}_{''.join(name_parts)}"
+
+            for (fsn, sku), qty in counts.items():
                 output_rows.append({
                     'BOX NUMBER': box_number,
-                    'BOX NAME': f"{box_number}_{sku}({remainder})",
+                    'BOX NAME': box_name,
                     'LENGTH (cm)': 54,
                     'BREADTH (cm)': 40,
                     'HEIGHT (cm)': 35,
                     'WEIGHT (kg)': 12,
                     'NOMINAL VALUE (INR)': 600,
                     'FSN': fsn,
-                    'QUANTITY': remainder,
+                    'QUANTITY': qty,
                 })
-                box_number += 1
+            box_number += 1
 
         out_df = pd.DataFrame(output_rows)
         output_path = os.path.join(tmp_dir, 'Generated_Box_Details.csv')
